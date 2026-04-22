@@ -14,6 +14,29 @@ Suggested shape for a standalone decision:
 **Consequences:** …
 ```
 
+## 2026-04-21 — DATA-004: left/right primary and empty vertical interval use `y_lo` / bbox-top
+
+**Context:** For a wide person box, **left** or **right** often wins the nearest-edge tie; vertical **centering** shifted **`y0`** down and clipped the head on the final crop. When **`min(H - h, y1)`** was below **`y2 - h`** (empty legal **`y`** interval, e.g. box flush to the top), the fallback still used a **centered** **`y0`** clamped to **`[0, H - h]`**, which could start **below** the detection top and clip the head.
+
+**Decision:** For **left** and **right** primary edges, set **`y0 = y_lo`**. In the **`else`** branch, when **`y_lo > y_hi`**, set **`y0 = max(0, min(y1c, h_img - h_i))`**.
+
+**Consequences:** **`docs/SPEC.md`** **DATA-004**; new **`tests/test_crop.py`** case for left-primary portrait aspect.
+
+## 2026-04-21 — `crop --debug` overlay JPEG
+
+**Context:** Diagnosing crop geometry (detector boxes vs. final crop) required ad-hoc scripts.
+
+**Decision:** Add optional ``--debug`` on ``imagecropper crop``. When set, write ``{stem}-debug.jpg`` beside each input after load: full source resolution with rectangles for the same windows used for strategy labeling (person, SSD + padded face, or center window) and corner ``(x,y)`` text. Respect ``--force`` for the debug path alongside the main output.
+
+**Consequences:** **DATA-006**, **CLI-005** / **CLI-007** updates in **`docs/SPEC.md`**; **`README.md`** options table; per-file progress may show ``dbg=`` basename.
+
+## 2026-04-21 — DATA-004: when bottom edge is primary, use minimum `y0`
+
+**Context:** With nearest-edge placement, choosing the **bottom** edge as primary (smallest slack under the detection box) set **`y0 = y_hi`**, shifting the aspect crop **down** within the legal vertical band. That often clipped heads on portrait outputs when feet sat near the frame bottom, even though the person box was fully contained.
+
+**Decision:** Keep **which** edge is primary (minimum slack among top, bottom, left, right; same tie order). When the primary edge is **bottom**, set **`y0 = y_lo`** (minimum legal vertical origin), matching the **top**-primary case and **favoring headroom** above the detection box top. **Human** and **face** paths both use **`_expand_bbox_to_aspect_crop`**, so they inherit this rule.
+
+**Consequences:** **`docs/SPEC.md`** **DATA-004** documents the exception; **`tests/test_crop.py`** bottom-edge expectation aligns with **`y_lo`**.
 
 ## 2026-04-21 — MIT License for the repository
 

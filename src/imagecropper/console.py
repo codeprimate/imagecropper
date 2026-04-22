@@ -87,11 +87,15 @@ def progress_line(result: CropResult) -> str:
     status = click.style("ok", fg="green", bold=True)
     strat = truncate_middle(result.strategy_used, 24)
     arrow = click.style("  →  ", fg="bright_black")
+    dbg = ""
+    if result.debug_output_path is not None:
+        dbg = f"  {click.style('dbg=', fg='bright_black')}{click.style(result.debug_output_path.name, fg='cyan')}"
     line = (
         f"{status}  {ms}  {click.style(in_base, bold=True)}"
         f"{arrow}{click.style(out_base, bold=True)}  "
         f"{click.style(strat, fg='yellow')}  "
         f"{click.style(wxh, fg='bright_black')}"
+        f"{dbg}"
     )
     return line + click.style("", reset=True)
 

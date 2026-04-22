@@ -78,6 +78,22 @@ def test_progress_line_success() -> None:
     assert "12ms" in row
 
 
+def test_progress_line_success_includes_debug_basename() -> None:
+    r = CropResult(
+        input_path=Path("/in/a.jpg"),
+        output_path=Path("/out/a-cropped.jpg"),
+        strategy_used="center",
+        elapsed_ms=3,
+        target_width=10,
+        target_height=10,
+        error=None,
+        debug_output_path=Path("/out/a-debug.jpg"),
+    )
+    row = click.unstyle(progress_line(r))
+    assert "dbg=" in row
+    assert "a-debug.jpg" in row
+
+
 def test_progress_line_error() -> None:
     r = CropResult(
         input_path=Path("/in/a.jpg"),

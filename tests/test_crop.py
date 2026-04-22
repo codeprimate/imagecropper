@@ -13,6 +13,7 @@ from imagecropper.crop import (
     ImageCropper,
     _expand_bbox_to_aspect_crop,
     _pad_detection_bbox,
+    write_crop_debug_jpeg,
 )
 
 
@@ -124,6 +125,49 @@ def test_crop_refuse_overwrite(tmp_path: Path) -> None:
     r = cropper.crop_one(inp, 4, 4, "center", None, False, enhance=False)
     assert r.error is not None
     assert "overwrite" in r.error.lower()
+
+
+def test_crop_refuse_overwrite_existing_debug_jpg(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    dbg = tmp_path / "x-debug.jpg"
+    dbg.write_bytes(b"existing")
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 4, 4, "center", None, False, enhance=False, debug=True)
+    assert r.error is not None
+    assert "overwrite" in r.error.lower()
+    assert "debug" in r.error.lower()
+
+
+def test_crop_one_debug_writes_debug_jpg(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 30, 40)
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 5, 5, "center", None, True, enhance=False, debug=True)
+    assert r.error is None
+    assert r.debug_output_path == tmp_path / "x-debug.jpg"
+    assert r.debug_output_path.exists()
+    with Image.open(r.debug_output_path) as dbg:
+        assert dbg.size == (30, 40)
+
+
+def test_write_crop_debug_jpeg_draws_and_saves(tmp_path: Path) -> None:
+    img = np.zeros((24, 32, 3), dtype=np.uint8)
+    out = tmp_path / "d.jpg"
+    write_crop_debug_jpeg(img, [("center_crop", (4, 6, 28, 20))], out)
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.size == (32, 24)
+
+
+def test_debug_annotation_boxes_center(tmp_path: Path) -> None:
+    cropper = ImageCropper(model_dir=tmp_path)
+    img = np.zeros((40, 30, 3), dtype=np.uint8)
+    boxes = cropper.debug_annotation_boxes(img, "center", 10, 10)
+    assert len(boxes) == 1
+    assert boxes[0][0] == "center_crop"
+    _label, (x1, y1, x2, y2) = boxes[0]
+    assert x2 > x1 and y2 > y1
 
 
 def test_crop_explicit_output_path(tmp_path: Path) -> None:
@@ -299,11 +343,11 @@ def test_expand_bbox_edge_first_top_anchor() -> None:
 
 
 def test_expand_bbox_edge_first_bottom_anchor() -> None:
-    """DATA-004: smallest slack to bottom → ``y0 = y_hi``."""
+    """DATA-004: smallest slack to bottom → ``y0 = y_lo`` (headroom; same as top-primary)."""
     img = np.zeros((100, 100, 3), dtype=np.uint8)
     img[85:99, 40:60, 0] = 9
     out = _expand_bbox_to_aspect_crop(img, 40, 85, 60, 99, 32, 32)
-    assert np.array_equal(out, img[80:100, 40:60, :])
+    assert np.array_equal(out, img[79:99, 40:60, :])
 
 
 def test_expand_bbox_edge_first_left_anchor() -> None:
@@ -312,6 +356,25 @@ def test_expand_bbox_edge_first_left_anchor() -> None:
     img[40:60, 2:22, 0] = 11
     out = _expand_bbox_to_aspect_crop(img, 2, 40, 22, 60, 32, 32)
     assert np.array_equal(out, img[40:60, 2:22, :])
+
+
+def test_expand_bbox_left_primary_uses_y_lo_not_vertical_center() -> None:
+    """Wide box + left primary: ``y0`` SHALL be ``y_lo`` (not vertical center) for headroom."""
+    img = np.zeros((150, 200, 3), dtype=np.uint8)
+    img[40:90, 5:25, 0] = 42
+    out = _expand_bbox_to_aspect_crop(img, 5, 40, 25, 90, 30, 100)
+    assert out.shape == (67, 20, 3)
+    assert np.array_equal(out, img[23:90, 5:25, :])
+
+
+def test_expand_bbox_degenerate_y_prefers_bbox_top() -> None:
+    """When ``y_lo > y_hi``, crop top uses ``max(0, min(y1c, H - h_i))`` (head bias)."""
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    img[0:11, 0:2, 0] = 99
+    out = _expand_bbox_to_aspect_crop(img, 0, 0, 2, 11, 30, 10)
+    assert out.shape == (10, 30, 3)
+    assert out[0, 0, 0] == 99
+    assert np.array_equal(out, img[0:10, 0:30, :])
 
 
 def test_expand_bbox_edge_first_right_anchor() -> None:

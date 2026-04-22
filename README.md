@@ -131,6 +131,7 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 | `--quiet` | Less chatter on stderr. |
 | `--anon` | After crop and resize: inpaint + blur inside an expanded SSD face oval on the output-sized frame. |
 | `--enhance` / `--no-enhance` | Post-resize GFPGAN when a face is seen on the resized image (default: **on**; skipped with `--anon` or if deps/models fail). |
+| `--debug` | Write `{input-stem}-debug.jpg` next to each input: full-resolution source with detector/crop rectangles and corner `(x,y)` labels (see [docs/SPEC.md](docs/SPEC.md) **DATA-006**). |
 
 Default output when `-o` is omitted: `{input-stem}-cropped.jpg` next to each input.
 

@@ -96,6 +96,12 @@ def cli(ctx: click.Context) -> None:
     show_default=True,
     help="After resize, GFPGAN-enhance if a face is detected (default: on).",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    help="Write {stem}-debug.jpg beside each input: original with detector/crop boxes and corner (x,y) labels.",
+)
 def crop_command(
     inputs: tuple[Path, ...],
     width: int,
@@ -107,6 +113,7 @@ def crop_command(
     quiet: bool,
     anon: bool,
     enhance: bool,
+    debug: bool,
 ) -> None:
     """Crop each INPUT to WIDTH×HEIGHT (defaults 1024×1024) using person / face / center heuristics."""
     if width <= 0 or height <= 0:
@@ -147,6 +154,7 @@ def crop_command(
             force,
             anon=anon,
             enhance=enhance,
+            debug=debug,
         )
         results.append(result)
         if result.error or not quiet:

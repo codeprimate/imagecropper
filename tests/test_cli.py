@@ -49,6 +49,22 @@ def test_crop_help() -> None:
     assert "--anon" in result.output
     assert "--enhance" in result.output
     assert "--no-enhance" in result.output
+    assert "--debug" in result.output
+
+
+def test_crop_debug_writes_debug_jpeg(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "5", "-H", "5", "-s", "center", "--debug", "--quiet"],
+    )
+    assert result.exit_code == 0
+    dbg = tmp_path / "a-debug.jpg"
+    assert dbg.exists()
+    with Image.open(dbg) as pil:
+        assert pil.size == (20, 30)
 
 
 def test_crop_requires_positive_dimensions(tmp_path: Path) -> None:
