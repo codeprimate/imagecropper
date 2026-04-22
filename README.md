@@ -174,7 +174,7 @@ Line coverage is enforced at **≥80%** (see `pyproject.toml`).
 
 ## License
 
-This project is licensed under [Creative Commons Attribution-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-sa/4.0/) (**CC BY-SA 4.0**). See the [`LICENSE`](LICENSE) file for the full legal text.
+This project is licensed under the [MIT License](https://opensource.org/licenses/MIT). See the [`LICENSE`](LICENSE) file for the full text.
 
 ---
 

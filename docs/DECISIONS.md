@@ -15,6 +15,14 @@ Suggested shape for a standalone decision:
 ```
 
 
+## 2026-04-21 — MIT License for the repository
+
+**Context:** The project is distributed as software and needs a simple, permissive license.
+
+**Decision:** Ship **`LICENSE`** as the **MIT** grant at the repository root; set **`license = "MIT"`** and **`license-files = ["LICENSE"]`** in **`pyproject.toml`** (SPDX; setuptools **≥77**).
+
+**Consequences:** Downstream use, modification, and redistribution follow **MIT**; **`README.md`** states the license and points to **`LICENSE`**.
+
 ## 2026-04-21 — GFPGAN as a core runtime dependency
 
 **Context:** Face restoration should work after a normal install without users opting into a separate **`[enhance]`** extra.
@@ -22,14 +30,6 @@ Suggested shape for a standalone decision:
 **Decision:** Declare **gfpgan** in **`[project.dependencies]`** and remove the **`enhance`** optional dependency group from **`pyproject.toml`**.
 
 **Consequences:** Every standard install pulls GFPGAN and its transitive requirements; spec items **NFR-BLD-003**, **NFR-BLD-006**, and **CLI-005** / **CLI-009** are updated so **`(enhance failed)`** applies to runtime/model failures, not to a deliberately omitted optional extra.
-
-## 2026-04-21 — Creative Commons BY-SA 4.0 for the repository
-
-**Context:** The project needed an explicit public license aligned with **share-alike** redistribution of adaptations.
-
-**Decision:** Apply **Creative Commons Attribution-ShareAlike 4.0 International** (**CC BY-SA 4.0**): ship the full legal text as **`LICENSE`** at the repository root; record **`license = "CC-BY-SA-4.0"`** and **`license-files = ["LICENSE"]`** in **`pyproject.toml`** (setuptools **≥77**). Remove the PyPI trove classifier that claimed **MIT**.
-
-**Consequences:** Downstream users must follow **BY** (attribution) and **SA** (compatible license on adapted material) as defined in the legal text. Creative Commons positions these licenses mainly for creative works rather than software; if that mismatch matters for a consumer, they should treat this as a deliberate project choice or negotiate a separate grant.
 
 ## 2026-04-21 — Smart `crop` CLI: stack, detection, geometry, status, enhance, anonymize
 
