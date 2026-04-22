@@ -24,7 +24,20 @@ Using pip (editable dev install):
 pip install -e ".[dev]"
 ```
 
-Runtime pulls in **PyTorch**, **OpenCV**, **Ultralytics (YOLO)**, and related stack; first use may download detector weights into `~/.imagecropper` (override with `--model-dir`).
+Runtime pulls in **PyTorch**, **OpenCV**, **Ultralytics (YOLO)**, and related stack. Some weights are fetched on first use (see below).
+
+### First-run downloads (approximate sizes)
+
+Sizes are **HTTP `Content-Length`** values checked in April 2026; release assets can change slightly over time.
+
+| File | When it is needed | Where it is stored (defaults) | Approx. size |
+|------|-------------------|-------------------------------|----------------|
+| `deploy.prototxt` | Face-related paths (SSD): `face` / `auto` face branch, `--anon`, default **enhance** face gate | `--model-dir` (default `~/.imagecropper`) | ~28 KB |
+| `res10_300x300_ssd_iter_140000.caffemodel` | Same as above | `--model-dir` | ~10 MB |
+| `yolov8m.pt` | `human` or `auto` when the human branch runs | **Not** under `--model-dir`. Ultralytics resolves `yolov8m.pt` in the **current working directory** first, then under its global **`weights_dir`**, then downloads into the working directory as `./yolov8m.pt`. Inspect or change that directory with `yolo settings` (see [Ultralytics docs](https://docs.ultralytics.com/quickstart/#ultralytics-settings)). | ~50 MB |
+| `GFPGANv1.4.pth` | Default **enhance** path when a face is seen on the resized output and the **`enhance`** extra is installed | `--model-dir` | ~330 MB |
+
+**Rough totals:** face / auto / anon / enhance checks that only need SSD files: **~10 MB** under `--model-dir`. A run that also needs person detection adds **~50 MB** (YOLO, location as above). A successful GFPGAN run adds **~330 MB** under `--model-dir`.
 
 ## Quick start
 
@@ -57,7 +70,7 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 |--------|-------------|
 | `-W`, `--width` / `-H`, `--height` | Output dimensions (positive integers). |
 | `-s`, `--strategy` | `auto` (default), `human`, `face`, or `center`. |
-| `--model-dir` | Cache directory for models (default: `~/.imagecropper`). |
+| `--model-dir` | Cache for OpenCV SSD + GFPGAN weights (default: `~/.imagecropper`); does not relocate Ultralytics `yolov8m.pt` (see [First-run downloads](#first-run-downloads-approximate-sizes)). |
 | `-o`, `--output` | Output path; only when exactly one input is given. |
 | `--force` | Overwrite an existing output file. |
 | `--quiet` | Less chatter on stderr. |

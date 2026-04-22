@@ -141,6 +141,9 @@ Development workflows **SHALL** assume **uv**. Installing development tools **SH
 **NFR-BLD-006 — Optional ``enhance`` extra**  
 The package **SHALL** declare an optional dependency group named ``enhance`` in `pyproject.toml` that includes **GFPGAN** and its transitive requirements so that ``uv sync --extra enhance`` installs face-restoration support. The core runtime dependency list **SHALL NOT** require ``gfpgan``; with enhancement **on** by default (``CLI-009``) and that extra **not** installed, a face detected on the resized output **SHALL** yield the **CLI-009** ``(enhance failed)`` fallback behavior (still emitting a successful crop when the rest of the pipeline succeeds).
 
+**NFR-BLD-007 — Documented first-run downloads**  
+The repository **SHALL** ship user-facing documentation (``README.md``) that enumerates each weight or definition file the implementation may download at runtime, with approximate on-disk size and the feature path that triggers the fetch. That documentation **SHALL** distinguish artifacts stored under ``--model-dir`` (OpenCV SSD files and ``GFPGANv1.4.pth``) from **YOLOv8m** checkpoint resolution performed by **Ultralytics** (``yolov8m.pt``), which **SHALL NOT** be implied to live under ``--model-dir`` by default.
+
 ---
 
 ## 8. Non-functional — quality and verification
