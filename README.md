@@ -126,14 +126,14 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 | `-W`, `--width` / `-H`, `--height` | Output dimensions (positive integers). |
 | `-s`, `--strategy` | `auto` (default), `human`, `face`, or `center`. |
 | `--model-dir` | Cache for OpenCV SSD + GFPGAN weights (default: `~/.imagecropper`); does not relocate Ultralytics `yolov8m.pt` (see [First-run downloads](#first-run-downloads-approximate-sizes)). |
-| `-o`, `--output` | Output path; only when exactly one input is given. |
+| `-o`, `--output` | Output path; only when exactly one input is given. Invalid when detection would produce more than one crop (see **CLI-006** in [docs/SPEC.md](docs/SPEC.md)). |
 | `--force` | Overwrite an existing output file. |
 | `--quiet` | Less chatter on stderr. |
 | `--anon` | After crop and resize: inpaint + blur inside an expanded SSD face oval on the output-sized frame. |
 | `--enhance` / `--no-enhance` | Post-resize GFPGAN when a face is seen on the resized image (default: **on**; skipped with `--anon` or if deps/models fail). |
 | `--debug` | Write `{input-stem}-debug.jpg` next to each input: full-resolution source with detector/crop rectangles and corner `(x,y)` labels (see [docs/SPEC.md](docs/SPEC.md) **DATA-006**). |
 
-Default output when `-o` is omitted: `{input-stem}-cropped.jpg` next to each input.
+Default output when `-o` is omitted: `{input-stem}-cropped.jpg` next to each input when there is a single subject crop; if several people or several faces are detected, numbered files `{stem}-cropped-01.jpg`, … are written instead (see **CLI-006** in the spec).
 
 ### Exit codes
 

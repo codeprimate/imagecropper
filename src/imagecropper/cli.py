@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import sys
 from pathlib import Path
 from time import perf_counter
 from typing import cast
@@ -16,6 +18,18 @@ from imagecropper.console import (
     progress_line,
 )
 from imagecropper.crop import CropResult, ImageCropper, StrategyName
+
+
+def _echo_err(message: str = "", *, nl: bool = True) -> None:
+    """Write to stderr and flush so progress is visible under captured/piped stderr."""
+    click.echo(message, err=True, nl=nl)
+    with contextlib.suppress(AttributeError, OSError):
+        sys.stderr.flush()
+
+
+def _crop_progress(msg: str) -> None:
+    """Interim status while ``crop_one`` runs (per detection / per output file)."""
+    _echo_err(click.style(f"  ...  {msg}", fg="bright_black"))
 
 
 @click.group(name="imagecropper", invoke_without_command=True)
@@ -127,7 +141,7 @@ def crop_command(
     resolved_model_dir = cropper.model_dir
 
     if not quiet:
-        click.echo(
+        _echo_err(
             banner_line1(
                 strategy,
                 resolved_model_dir,
@@ -136,10 +150,9 @@ def crop_command(
                 anon=anon,
                 enhance=enhance,
             ),
-            err=True,
         )
-        click.echo(banner_separator(), err=True)
-        click.echo("", err=True)
+        _echo_err(banner_separator())
+        _echo_err("")
 
     results: list[CropResult] = []
     t0 = perf_counter()
@@ -155,19 +168,20 @@ def crop_command(
             anon=anon,
             enhance=enhance,
             debug=debug,
+            progress=_crop_progress if not quiet else None,
         )
         results.append(result)
         if result.error or not quiet:
-            click.echo(progress_line(result), err=True)
+            _echo_err(progress_line(result))
 
     total_s = perf_counter() - t0
     ok = sum(1 for r in results if not r.error)
     failed = len(results) - ok
 
     if not quiet:
-        click.echo("", err=True)
+        _echo_err("")
         out_dir = _footer_output_dir(results)
-        click.echo(footer(ok, failed, total_s, out_dir), err=True)
+        _echo_err(footer(ok, failed, total_s, out_dir))
 
     if failed:
         raise click.exceptions.Exit(1)
@@ -185,4 +199,10 @@ def _footer_output_dir(results: list[CropResult]) -> Path:
 
 def main() -> None:
     """Console script entrypoint."""
+    # Line-buffer stderr when supported so progress lines appear under captured/piped stderr
+    # (e.g. IDE tasks) instead of only after the process exits.
+    _reconfigure = getattr(sys.stderr, "reconfigure", None)
+    if callable(_reconfigure):
+        with contextlib.suppress(OSError, ValueError):
+            _reconfigure(line_buffering=True)
     cli()

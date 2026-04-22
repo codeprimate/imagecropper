@@ -4,6 +4,22 @@ Record **architectural and behavioral decisions** here so future work does not r
 
 **Newest first.** Related choices that landed the same day **may** be merged into one dated section (subsections + a short consequences line) instead of many micro-entries.
 
+## 2026-04-21 — Verbose stderr: per-crop progress callback
+
+**Context:** Long-running ``crop_one`` (YOLO, GFPGAN, multiple subjects) produced no stderr until the full per-input summary line, which felt unresponsive under captured stderr.
+
+**Decision:** ``crop_one`` accepts an optional ``progress: Callable[[str], None]``; the CLI passes a styled writer when not ``--quiet``, emitting lines before region selection and before each ``crop i/n`` save. **CLI-007** distinguishes interim lines from the final per-input summary line.
+
+**Consequences:** Tests may assert callback strings; quiet mode passes ``progress=None``.
+
+## 2026-04-21 — Multi-subject crops (automatic numbered sidecars)
+
+**Context:** Group photos often contain several people or faces; the tool previously kept only the highest-confidence detection.
+
+**Decision:** When YOLO returns multiple COCO person boxes or the SSD returns multiple faces above the existing confidence threshold, ``crop`` writes **one** resized output per detection (same aspect expansion and post-resize enhance/anon as today), ordered by **descending confidence**. A single output uses ``{stem}-cropped.jpg``; multiple outputs use ``{stem}-cropped-01.jpg`` … with pad width ``max(2, len(str(N)))``. If ``--output`` names a single file but ``N > 1``, fail that input with **no** crop writes. **No** IoU deduplication or NMS between overlapping boxes in this version. Progress line strategy text uses the **first** crop’s suffix chain plus `` ×N``; later crops may differ (e.g. enhance skipped) without being listed individually. Overwrite checks for implicit sidecars run **after** detection so ``N`` is known; only the debug JPEG is pre-checked before load when ``--output`` is omitted.
+
+**Consequences:** **DATA-003**, **CLI-006**, **CLI-007**, **DATA-006** updates in ``docs/SPEC.md``; ``detect_human_bboxes`` / ``detect_face_padded_bbox_list`` and ``CropResult.output_paths``.
+
 Suggested shape for a standalone decision:
 
 ```text

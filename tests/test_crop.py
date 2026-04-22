@@ -13,6 +13,7 @@ from imagecropper.crop import (
     ImageCropper,
     _expand_bbox_to_aspect_crop,
     _pad_detection_bbox,
+    _pil_to_bgr,
     write_crop_debug_jpeg,
 )
 
@@ -44,7 +45,7 @@ def test_crop_one_human_strategy_no_detection(tmp_path: Path, mocker: Any) -> No
     inp = tmp_path / "x.png"
     _rgb_png(inp, 8, 8)
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_human", return_value=None)
+    mocker.patch.object(ImageCropper, "detect_human_bboxes", return_value=[])
     r = cropper.crop_one(inp, 4, 4, "human", None, True, enhance=False)
     assert r.error is not None
     assert "human" in r.error.lower()
@@ -55,7 +56,7 @@ def test_crop_one_human_strategy_with_detection(tmp_path: Path, mocker: Any) -> 
     _rgb_png(inp, 20, 20)
     patch = np.zeros((10, 10, 3), dtype=np.uint8)
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_human", return_value=patch)
+    mocker.patch.object(ImageCropper, "_select_regions", return_value=[(patch, "human")])
     r = cropper.crop_one(inp, 4, 4, "human", None, True, enhance=False)
     assert r.error is None
     assert r.strategy_used == "human"
@@ -65,7 +66,7 @@ def test_crop_one_face_strategy_no_detection(tmp_path: Path, mocker: Any) -> Non
     inp = tmp_path / "x.png"
     _rgb_png(inp, 8, 8)
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_face", return_value=None)
+    mocker.patch.object(ImageCropper, "detect_face_padded_bbox_list", return_value=[])
     r = cropper.crop_one(inp, 4, 4, "face", None, True, enhance=False)
     assert r.error is not None
 
@@ -75,7 +76,7 @@ def test_crop_one_face_strategy_with_detection(tmp_path: Path, mocker: Any) -> N
     _rgb_png(inp, 20, 20)
     patch = np.zeros((8, 8, 3), dtype=np.uint8)
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_face", return_value=patch)
+    mocker.patch.object(ImageCropper, "_select_regions", return_value=[(patch, "face")])
     r = cropper.crop_one(inp, 3, 3, "face", None, True, enhance=False)
     assert r.error is None
     assert r.strategy_used == "face"
@@ -86,8 +87,7 @@ def test_crop_auto_prefers_human(tmp_path: Path, mocker: Any) -> None:
     _rgb_png(inp, 20, 20)
     patch = np.ones((6, 6, 3), dtype=np.uint8) * 200
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_human", return_value=patch)
-    mocker.patch.object(ImageCropper, "detect_face", return_value=None)
+    mocker.patch.object(ImageCropper, "_select_regions", return_value=[(patch, "human")])
     r = cropper.crop_one(inp, 4, 4, "auto", None, True, enhance=False)
     assert r.error is None
     assert r.strategy_used == "human"
@@ -98,8 +98,7 @@ def test_crop_auto_face_fallback(tmp_path: Path, mocker: Any) -> None:
     _rgb_png(inp, 20, 20)
     face_patch = np.ones((5, 5, 3), dtype=np.uint8) * 100
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_human", return_value=None)
-    mocker.patch.object(ImageCropper, "detect_face", return_value=face_patch)
+    mocker.patch.object(ImageCropper, "_select_regions", return_value=[(face_patch, "face")])
     r = cropper.crop_one(inp, 4, 4, "auto", None, True, enhance=False)
     assert r.error is None
     assert r.strategy_used == "face"
@@ -109,8 +108,11 @@ def test_crop_auto_center_fallback(tmp_path: Path, mocker: Any) -> None:
     inp = tmp_path / "x.png"
     _rgb_png(inp, 12, 16)
     cropper = ImageCropper(model_dir=tmp_path)
-    mocker.patch.object(ImageCropper, "detect_human", return_value=None)
-    mocker.patch.object(ImageCropper, "detect_face", return_value=None)
+    with Image.open(inp) as pil:
+        pil.load()
+        img_bgr = _pil_to_bgr(pil)
+    center_patch = cropper.center_crop(img_bgr, 4, 4)
+    mocker.patch.object(ImageCropper, "_select_regions", return_value=[(center_patch, "center")])
     r = cropper.crop_one(inp, 4, 4, "auto", None, True, enhance=False)
     assert r.error is None
     assert r.strategy_used == "center"
@@ -629,3 +631,155 @@ def test_crop_one_image_open_oserror(tmp_path: Path, mocker: Any) -> None:
     r = cropper.crop_one(inp, 2, 2, "center", None, True, enhance=False)
     assert r.error is not None
     assert "read fail" in r.error
+
+
+def test_select_regions_unknown_strategy() -> None:
+    cropper = ImageCropper(model_dir=Path("/tmp"))
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="unknown strategy"):
+        cropper._select_regions(img, 4, 4, cast(Any, "invalid"))
+
+
+def test_detect_human_bboxes_sorted_by_confidence(tmp_path: Path) -> None:
+    cropper = ImageCropper(model_dir=tmp_path)
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    class _Boxes:
+        xyxy = np.array(
+            [
+                [10.0, 10.0, 30.0, 35.0],
+                [5.0, 5.0, 95.0, 95.0],
+            ],
+            dtype=np.float32,
+        )
+        cls = np.array([0.0, 0.0], dtype=np.float32)
+        conf = np.array([0.99, 0.2], dtype=np.float32)
+
+        def __len__(self) -> int:
+            return 2
+
+    class _R0:
+        boxes = _Boxes()
+
+    class _Model:
+        def predict(self, _img: Any, verbose: bool = False) -> list[Any]:
+            return [_R0()]
+
+    cropper._human_net = _Model()
+    boxes = cropper.detect_human_bboxes(img)
+    assert len(boxes) == 2
+    assert boxes[0] == (10, 10, 30, 35)
+
+
+def test_detect_face_padded_bbox_list_two_faces(tmp_path: Path, mocker: Any) -> None:
+    cropper = ImageCropper(model_dir=tmp_path)
+    net = mocker.MagicMock()
+    d = np.zeros((1, 1, 3, 7), dtype=np.float32)
+    d[0, 0, 0, 2] = 0.95
+    d[0, 0, 0, 3:7] = [0.1, 0.1, 0.4, 0.4]
+    d[0, 0, 1, 2] = 0.7
+    d[0, 0, 1, 3:7] = [0.5, 0.5, 0.9, 0.9]
+    d[0, 0, 2, 2] = 0.1
+    net.forward.return_value = d
+    cropper._face_net = net
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    lst = cropper.detect_face_padded_bbox_list(img)
+    assert len(lst) == 2
+    assert lst[0][0][0] < lst[1][0][0]
+
+
+def test_crop_one_progress_emits_per_crop(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "g.png"
+    _rgb_png(inp, 50, 50)
+    p1 = np.ones((10, 10, 3), dtype=np.uint8) * 10
+    p2 = np.ones((8, 8, 3), dtype=np.uint8) * 50
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    lines: list[str] = []
+
+    def _cb(msg: str) -> None:
+        lines.append(msg)
+
+    r = cropper.crop_one(
+        inp, 4, 4, "human", None, True, enhance=False, progress=_cb
+    )
+    assert r.error is None
+    assert any("selecting crop regions" in x for x in lines)
+    assert sum(1 for x in lines if "crop 1/2" in x) == 1
+    assert sum(1 for x in lines if "crop 2/2" in x) == 1
+    assert any("g-cropped-01.jpg" in x for x in lines)
+
+
+def test_crop_multi_writes_numbered_sidecars(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "g.png"
+    _rgb_png(inp, 50, 50)
+    p1 = np.ones((10, 10, 3), dtype=np.uint8) * 10
+    p2 = np.ones((8, 8, 3), dtype=np.uint8) * 50
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    r = cropper.crop_one(inp, 4, 4, "human", None, True, enhance=False)
+    assert r.error is None
+    assert r.output_paths is not None
+    assert len(r.output_paths) == 2
+    assert r.output_path == r.output_paths[0]
+    assert " ×2" in r.strategy_used
+    assert (tmp_path / "g-cropped-01.jpg").exists()
+    assert (tmp_path / "g-cropped-02.jpg").exists()
+    assert not (tmp_path / "g-cropped.jpg").exists()
+
+
+def test_crop_explicit_output_rejects_multi(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "g.png"
+    _rgb_png(inp, 40, 40)
+    out = tmp_path / "only.jpg"
+    p1 = np.ones((6, 6, 3), dtype=np.uint8)
+    p2 = np.ones((6, 6, 3), dtype=np.uint8) * 2
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    r = cropper.crop_one(inp, 3, 3, "human", out, True, enhance=False)
+    assert r.error is not None
+    assert "multiple subjects" in r.error.lower()
+    assert not out.exists()
+
+
+def test_crop_refuse_overwrite_numbered_sibling(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "g.png"
+    _rgb_png(inp, 40, 40)
+    block = tmp_path / "g-cropped-02.jpg"
+    block.write_bytes(b"exists")
+    p1 = np.ones((6, 6, 3), dtype=np.uint8)
+    p2 = np.ones((6, 6, 3), dtype=np.uint8) * 2
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    r = cropper.crop_one(inp, 3, 3, "human", None, False, enhance=False)
+    assert r.error is not None
+    assert "overwrite" in r.error.lower()
+    assert "g-cropped-02" in r.error
+
+
+def test_debug_annotation_boxes_human_indexed(tmp_path: Path, mocker: Any) -> None:
+    cropper = ImageCropper(model_dir=tmp_path)
+    img = np.zeros((30, 30, 3), dtype=np.uint8)
+    mocker.patch.object(
+        ImageCropper,
+        "detect_human_bboxes",
+        return_value=[(1, 1, 5, 5), (10, 10, 20, 20)],
+    )
+    boxes = cropper.debug_annotation_boxes(img, "human", 8, 8)
+    assert [b[0] for b in boxes] == ["person_01", "person_02"]

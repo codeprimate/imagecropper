@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
@@ -50,6 +51,7 @@ class CropResult:
     target_height: int
     error: str | None = None
     debug_output_path: Path | None = None
+    output_paths: tuple[Path, ...] | None = None
 
 
 def _pad_detection_bbox(
@@ -154,8 +156,20 @@ def write_crop_debug_jpeg(
         "face_padded": (255, 96, 0),
         "center_crop": (0, 220, 220),
     }
+
+    def _color_for_label(lab: str) -> tuple[int, int, int]:
+        if lab in colors:
+            return colors[lab]
+        if lab.startswith("person"):
+            return colors["person"]
+        if lab.startswith("face_ssd"):
+            return colors["face_ssd"]
+        if lab.startswith("face_padded"):
+            return colors["face_padded"]
+        return (200, 200, 255)
+
     for label, (x1, y1, x2, y2) in labeled_boxes:
-        color = colors.get(label, (200, 200, 255))
+        color = _color_for_label(label)
         x1c = int(np.clip(x1, 0, max(0, w_img - 1)))
         y1c = int(np.clip(y1, 0, max(0, h_img - 1)))
         x2c = int(np.clip(x2, x1c + 1, w_img))
@@ -327,11 +341,7 @@ def _expand_bbox_to_aspect_crop(
         y0_t = int(np.floor(cy - h_i / 2.0 + 1e-9))
         x0 = int(np.clip(x0_t, x_lo, x_hi)) if x_lo <= x_hi else max(0, min(x0_t, w_img - w_i))
         # If no y0 contains the full bbox at this window size, anchor crop top to detection top.
-        y0 = (
-            int(np.clip(y0_t, y_lo, y_hi))
-            if y_lo <= y_hi
-            else max(0, min(y1c, h_img - h_i))
-        )
+        y0 = int(np.clip(y0_t, y_lo, y_hi)) if y_lo <= y_hi else max(0, min(y1c, h_img - h_i))
 
     return image_bgr[y0 : y0 + h_i, x0 : x0 + w_i]
 
@@ -360,13 +370,15 @@ class ImageCropper:
             self._human_net = YOLO(_HUMAN_YOLO_WEIGHTS)
         return self._human_net
 
-    def detect_human_bbox(self, image_bgr: npt.NDArray[np.uint8]) -> tuple[int, int, int, int] | None:
-        """Highest-confidence COCO person ``xyxy``, clipped to the image (**DATA-003**)."""
+    def _human_person_boxes_xyxy_ordered(
+        self, image_bgr: npt.NDArray[np.uint8]
+    ) -> list[tuple[int, int, int, int]]:
+        """All COCO class-0 ``xyxy`` clipped to the image, sorted by confidence descending."""
         model = self._ensure_human_net()
         results = model.predict(image_bgr, verbose=False)
         r0 = results[0]
         if r0.boxes is None or len(r0.boxes) == 0:
-            return None
+            return []
         xyxy_t = r0.boxes.xyxy
         cls_t = r0.boxes.cls
         xyxy = xyxy_t.cpu().numpy() if hasattr(xyxy_t, "cpu") else np.asarray(xyxy_t)
@@ -376,17 +388,36 @@ class ImageCropper:
         person_mask = np.round(cls_vals).astype(np.int64) == _COCO_PERSON_CLASS
         idxs = np.flatnonzero(person_mask)
         if idxs.size == 0:
-            return None
-        j = int(idxs[int(np.argmax(conf[idxs]))])
-        x1, y1, x2, y2 = (int(round(float(c))) for c in xyxy[j])
-        if x2 <= x1 or y2 <= y1:
-            return None
+            return []
+        order = np.argsort(-conf[idxs])
+        sorted_j = [int(idxs[int(k)]) for k in order]
         h_img, w_img = image_bgr.shape[:2]
-        x1 = int(np.clip(x1, 0, max(0, w_img - 1)))
-        y1 = int(np.clip(y1, 0, max(0, h_img - 1)))
-        x2 = int(np.clip(x2, x1 + 1, w_img))
-        y2 = int(np.clip(y2, y1 + 1, h_img))
-        return x1, y1, x2, y2
+        out: list[tuple[int, int, int, int]] = []
+        for j in sorted_j:
+            x1, y1, x2, y2 = (int(round(float(c))) for c in xyxy[j])
+            if x2 <= x1 or y2 <= y1:
+                continue
+            x1 = int(np.clip(x1, 0, max(0, w_img - 1)))
+            y1 = int(np.clip(y1, 0, max(0, h_img - 1)))
+            x2 = int(np.clip(x2, x1 + 1, w_img))
+            y2 = int(np.clip(y2, y1 + 1, h_img))
+            out.append((x1, y1, x2, y2))
+        return out
+
+    def detect_human_bboxes(
+        self, image_bgr: npt.NDArray[np.uint8]
+    ) -> list[tuple[int, int, int, int]]:
+        """All COCO person boxes for multi-subject crops (confidence descending)."""
+        return self._human_person_boxes_xyxy_ordered(image_bgr)
+
+    def detect_human_bbox(
+        self, image_bgr: npt.NDArray[np.uint8]
+    ) -> tuple[int, int, int, int] | None:
+        """Highest-confidence COCO person ``xyxy``, clipped to the image (**DATA-003**)."""
+        boxes = self._human_person_boxes_xyxy_ordered(image_bgr)
+        if not boxes:
+            return None
+        return boxes[0]
 
     def detect_human(
         self,
@@ -401,10 +432,10 @@ class ImageCropper:
         x1, y1, x2, y2 = bbox
         return _expand_bbox_to_aspect_crop(image_bgr, x1, y1, x2, y2, target_width, target_height)
 
-    def detect_face_bbox(
+    def _ssd_face_raw_sorted(
         self, image_bgr: npt.NDArray[np.uint8]
-    ) -> tuple[int, int, int, int] | None:
-        """Highest-confidence SSD face box in pixel coordinates, or ``None`` if below threshold."""
+    ) -> list[tuple[tuple[int, int, int, int], float]]:
+        """SSD face ``xyxy`` and confidence for each detection above threshold, conf descending."""
         h, w = image_bgr.shape[:2]
         blob_size = (300, 300)
         blob = cv2.dnn.blobFromImage(
@@ -417,35 +448,60 @@ class ImageCropper:
         face_net.setInput(blob)
         detections = face_net.forward()
         if detections[0, 0, :, 2].max() <= _FACE_CONFIDENCE_THRESHOLD:
+            return []
+        n_det = int(detections.shape[2])
+        scored: list[tuple[float, tuple[int, int, int, int]]] = []
+        for i in range(n_det):
+            c = float(detections[0, 0, i, 2])
+            if c <= _FACE_CONFIDENCE_THRESHOLD:
+                continue
+            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+            start_x, start_y, end_x, end_y = box.astype("int")
+            if end_x <= start_x or end_y <= start_y:
+                continue
+            scored.append((c, (int(start_x), int(start_y), int(end_x), int(end_y))))
+        scored.sort(key=lambda t: -t[0])
+        return [(box, conf) for conf, box in scored]
+
+    def detect_face_padded_bbox_list(
+        self, image_bgr: npt.NDArray[np.uint8]
+    ) -> list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]]:
+        """Each SSD face above threshold: ``(raw_xyxy, padded_xyxy)``, confidence descending."""
+        h_img, w_img = image_bgr.shape[:2]
+        raw_list = self._ssd_face_raw_sorted(image_bgr)
+        out: list[tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = []
+        for (sx, sy, ex, ey), _c in raw_list:
+            px1, py1, px2, py2 = _pad_detection_bbox(
+                sx,
+                sy,
+                ex,
+                ey,
+                w_img,
+                h_img,
+                pad_x=_FACE_BBOX_PAD_X,
+                pad_y_top=_FACE_BBOX_PAD_TOP,
+                pad_y_bottom=_FACE_BBOX_PAD_BOTTOM,
+            )
+            out.append(((sx, sy, ex, ey), (px1, py1, px2, py2)))
+        return out
+
+    def detect_face_bbox(
+        self, image_bgr: npt.NDArray[np.uint8]
+    ) -> tuple[int, int, int, int] | None:
+        """Highest-confidence SSD face box in pixel coordinates, or ``None`` if below threshold."""
+        raw_list = self._ssd_face_raw_sorted(image_bgr)
+        if not raw_list:
             return None
-        i = int(np.argmax(detections[0, 0, :, 2]))
-        box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-        start_x, start_y, end_x, end_y = box.astype("int")
-        if end_x <= start_x or end_y <= start_y:
-            return None
-        return start_x, start_y, end_x, end_y
+        return raw_list[0][0]
 
     def detect_face_padded_bbox(
         self, image_bgr: npt.NDArray[np.uint8]
     ) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]] | None:
         """SSD ``xyxy`` and padded ``xyxy`` (both half-open), or ``None`` if no face above threshold."""
-        bbox = self.detect_face_bbox(image_bgr)
-        if bbox is None:
+        lst = self.detect_face_padded_bbox_list(image_bgr)
+        if not lst:
             return None
-        start_x, start_y, end_x, end_y = bbox
-        h_img, w_img = image_bgr.shape[:2]
-        px1, py1, px2, py2 = _pad_detection_bbox(
-            start_x,
-            start_y,
-            end_x,
-            end_y,
-            w_img,
-            h_img,
-            pad_x=_FACE_BBOX_PAD_X,
-            pad_y_top=_FACE_BBOX_PAD_TOP,
-            pad_y_bottom=_FACE_BBOX_PAD_BOTTOM,
-        )
-        return (start_x, start_y, end_x, end_y), (px1, py1, px2, py2)
+        return lst[0]
 
     def detect_face(
         self,
@@ -485,25 +541,88 @@ class ImageCropper:
     ) -> list[tuple[str, tuple[int, int, int, int]]]:
         """Boxes drawn on ``--debug`` JPEG (same semantics as region selection)."""
         if strategy == "center":
-            return [("center_crop", _center_crop_window_xyxy(image_bgr, target_width, target_height))]
+            return [
+                ("center_crop", _center_crop_window_xyxy(image_bgr, target_width, target_height))
+            ]
         if strategy == "human":
-            bbox = self.detect_human_bbox(image_bgr)
-            return [("person", bbox)] if bbox is not None else []
+            boxes = self.detect_human_bboxes(image_bgr)
+            return [(f"person_{i + 1:02d}", b) for i, b in enumerate(boxes)]
         if strategy == "face":
-            pair = self.detect_face_padded_bbox(image_bgr)
-            if pair is None:
-                return []
-            raw, padded = pair
-            return [("face_ssd", raw), ("face_padded", padded)]
+            pairs = self.detect_face_padded_bbox_list(image_bgr)
+            out: list[tuple[str, tuple[int, int, int, int]]] = []
+            for i, (raw, padded) in enumerate(pairs):
+                out.append((f"face_ssd_{i + 1:02d}", raw))
+                out.append((f"face_padded_{i + 1:02d}", padded))
+            return out
         if strategy == "auto":
-            hb = self.detect_human_bbox(image_bgr)
-            if hb is not None:
-                return [("person", hb)]
-            fp = self.detect_face_padded_bbox(image_bgr)
-            if fp is not None:
-                raw, padded = fp
-                return [("face_ssd", raw), ("face_padded", padded)]
-            return [("center_crop", _center_crop_window_xyxy(image_bgr, target_width, target_height))]
+            pboxes = self.detect_human_bboxes(image_bgr)
+            if pboxes:
+                return [(f"person_{i + 1:02d}", b) for i, b in enumerate(pboxes)]
+            pairs = self.detect_face_padded_bbox_list(image_bgr)
+            if pairs:
+                out_auto: list[tuple[str, tuple[int, int, int, int]]] = []
+                for i, (raw, padded) in enumerate(pairs):
+                    out_auto.append((f"face_ssd_{i + 1:02d}", raw))
+                    out_auto.append((f"face_padded_{i + 1:02d}", padded))
+                return out_auto
+            return [
+                ("center_crop", _center_crop_window_xyxy(image_bgr, target_width, target_height))
+            ]
+        msg = f"unknown strategy: {strategy}"
+        raise ValueError(msg)
+
+    def _select_regions(
+        self,
+        image_bgr: npt.NDArray[np.uint8],
+        target_width: int,
+        target_height: int,
+        strategy: StrategyName,
+    ) -> list[tuple[npt.NDArray[np.uint8], str]]:
+        tw, th = int(target_width), int(target_height)
+        if strategy == "center":
+            return [(self.center_crop(image_bgr, tw, th), "center")]
+
+        if strategy == "human":
+            boxes = self.detect_human_bboxes(image_bgr)
+            if not boxes:
+                msg = "no human detection"
+                raise ValueError(msg)
+            return [
+                (_expand_bbox_to_aspect_crop(image_bgr, x1, y1, x2, y2, tw, th), "human")
+                for x1, y1, x2, y2 in boxes
+            ]
+
+        if strategy == "face":
+            pairs = self.detect_face_padded_bbox_list(image_bgr)
+            if not pairs:
+                msg = "no face detection"
+                raise ValueError(msg)
+            return [
+                (
+                    _expand_bbox_to_aspect_crop(image_bgr, px1, py1, px2, py2, tw, th),
+                    "face",
+                )
+                for _raw, (px1, py1, px2, py2) in pairs
+            ]
+
+        if strategy == "auto":
+            boxes = self.detect_human_bboxes(image_bgr)
+            if boxes:
+                return [
+                    (_expand_bbox_to_aspect_crop(image_bgr, x1, y1, x2, y2, tw, th), "human")
+                    for x1, y1, x2, y2 in boxes
+                ]
+            pairs = self.detect_face_padded_bbox_list(image_bgr)
+            if pairs:
+                return [
+                    (
+                        _expand_bbox_to_aspect_crop(image_bgr, px1, py1, px2, py2, tw, th),
+                        "face",
+                    )
+                    for _raw, (px1, py1, px2, py2) in pairs
+                ]
+            return [(self.center_crop(image_bgr, tw, th), "center")]
+
         msg = f"unknown strategy: {strategy}"
         raise ValueError(msg)
 
@@ -514,34 +633,8 @@ class ImageCropper:
         target_height: int,
         strategy: StrategyName,
     ) -> tuple[npt.NDArray[np.uint8], str]:
-        if strategy == "center":
-            return self.center_crop(image_bgr, target_width, target_height), "center"
-
-        if strategy == "auto":
-            cropped = self.detect_human(image_bgr, target_width, target_height)
-            if cropped is not None:
-                return cropped, "human"
-            cropped = self.detect_face(image_bgr, target_width, target_height)
-            if cropped is not None:
-                return cropped, "face"
-            return self.center_crop(image_bgr, target_width, target_height), "center"
-
-        if strategy == "human":
-            cropped = self.detect_human(image_bgr, target_width, target_height)
-            if cropped is None:
-                msg = "no human detection"
-                raise ValueError(msg)
-            return cropped, "human"
-
-        if strategy == "face":
-            cropped = self.detect_face(image_bgr, target_width, target_height)
-            if cropped is None:
-                msg = "no face detection"
-                raise ValueError(msg)
-            return cropped, "face"
-
-        msg = f"unknown strategy: {strategy}"
-        raise ValueError(msg)
+        regions = self._select_regions(image_bgr, target_width, target_height, strategy)
+        return regions[0]
 
     def crop_one(
         self,
@@ -555,20 +648,22 @@ class ImageCropper:
         enhance: bool = True,
         *,
         debug: bool = False,
+        progress: Callable[[str], None] | None = None,
     ) -> CropResult:
-        """Load image, select region, resize, save. Returns timing and strategy used."""
-        t0 = perf_counter()
-        if output_path is None:
-            out = input_path.parent / f"{input_path.stem}-cropped.jpg"
-        else:
-            out = output_path
+        """Load image, select region(s), resize, save. Returns timing and strategy used.
 
-        debug_out: Path | None = (
-            (input_path.parent / f"{input_path.stem}-debug.jpg") if debug else None
-        )
+        When ``progress`` is set, it is called with short status strings (e.g. before
+        region detection and before each per-subject resize/enhance/save step).
+        """
+        t0 = perf_counter()
+        stem = input_path.stem
+        parent = input_path.parent
+        debug_out: Path | None = (parent / f"{stem}-debug.jpg") if debug else None
+        explicit_out = output_path is not None
+
         overwrite_blocks: list[str] = []
-        if out.exists() and not overwrite:
-            overwrite_blocks.append(str(out))
+        if explicit_out and output_path is not None and output_path.exists() and not overwrite:
+            overwrite_blocks.append(str(output_path))
         if debug_out is not None and debug_out.exists() and not overwrite:
             overwrite_blocks.append(str(debug_out))
         if overwrite_blocks:
@@ -592,40 +687,98 @@ class ImageCropper:
                     image_bgr, strategy, target_width, target_height
                 )
                 write_crop_debug_jpeg(image_bgr, boxes, debug_out)
-            region, strategy_used = self._select_region(
-                image_bgr, target_width, target_height, strategy
-            )
-            resized_bgr = cast(
-                npt.NDArray[np.uint8],
-                cv2.resize(region, (target_width, target_height)),
-            )
-            enhance_suffix = ""
-            if enhance:
-                if anon:
-                    enhance_suffix = " (enhance skipped: anon)"
-                elif self.detect_face_bbox(resized_bgr) is None:
-                    enhance_suffix = " (enhance skipped)"
-                else:
-                    try:
-                        resized_bgr = enhance_bgr_gfpgan(resized_bgr, self.model_dir)
-                        enhance_suffix = " (enhance)"
-                    except Exception:
-                        enhance_suffix = " (enhance failed)"
-            anon_suffix = ""
-            if anon:
-                face_bbox = self.detect_face_bbox(resized_bgr)
-                if face_bbox is None:
-                    anon_suffix = " (anon skipped)"
-                else:
-                    resized_bgr = anonymize_face_inpaint(resized_bgr, face_bbox)
-                    anon_suffix = " (anon)"
-            strategy_used = f"{strategy_used}{anon_suffix}{enhance_suffix}"
-            out_pil = _bgr_to_pil(resized_bgr)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            if out.suffix.lower() in {".jpg", ".jpeg"}:
-                out_pil.save(out, format="JPEG", quality=95)
+
+            if progress is not None:
+                progress(f"{input_path.name}: selecting crop regions...")
+            regions = self._select_regions(image_bgr, target_width, target_height, strategy)
+            n = len(regions)
+
+            if n > 1 and explicit_out:
+                elapsed_ms = int((perf_counter() - t0) * 1000)
+                dbg_multi = debug_out if (debug_out is not None and debug_out.exists()) else None
+                return CropResult(
+                    input_path=input_path,
+                    output_path=None,
+                    strategy_used="",
+                    elapsed_ms=elapsed_ms,
+                    target_width=target_width,
+                    target_height=target_height,
+                    error=(
+                        "multiple subjects detected; a single --output path cannot name more than "
+                        f"one crop; omit --output to write sidecar files ({stem}-cropped-01.jpg, ...)"
+                    ),
+                    debug_output_path=dbg_multi,
+                )
+
+            if n == 1 and explicit_out and output_path is not None:
+                paths = [output_path]
+            elif n == 1:
+                paths = [parent / f"{stem}-cropped.jpg"]
             else:
-                out_pil.save(out)
+                pad_w = max(2, len(str(n)))
+                paths = [parent / f"{stem}-cropped-{i:0{pad_w}d}.jpg" for i in range(1, n + 1)]
+
+            phase2_blocks: list[str] = []
+            for p in paths:
+                if p.exists() and not overwrite:
+                    phase2_blocks.append(str(p))
+            if phase2_blocks:
+                elapsed_ms = int((perf_counter() - t0) * 1000)
+                return CropResult(
+                    input_path=input_path,
+                    output_path=None,
+                    strategy_used="",
+                    elapsed_ms=elapsed_ms,
+                    target_width=target_width,
+                    target_height=target_height,
+                    error="refusing to overwrite existing file(s): " + "; ".join(phase2_blocks),
+                    debug_output_path=(
+                        debug_out if (debug_out is not None and debug_out.exists()) else None
+                    ),
+                )
+
+            first_full_label: str | None = None
+            for k, (region, base_label) in enumerate(regions):
+                if progress is not None:
+                    progress(f"{input_path.name}: crop {k + 1}/{n} -> {paths[k].name}")
+                resized_bgr = cast(
+                    npt.NDArray[np.uint8],
+                    cv2.resize(region, (int(target_width), int(target_height))),
+                )
+                enhance_suffix = ""
+                if enhance:
+                    if anon:
+                        enhance_suffix = " (enhance skipped: anon)"
+                    elif self.detect_face_bbox(resized_bgr) is None:
+                        enhance_suffix = " (enhance skipped)"
+                    else:
+                        try:
+                            resized_bgr = enhance_bgr_gfpgan(resized_bgr, self.model_dir)
+                            enhance_suffix = " (enhance)"
+                        except Exception:
+                            enhance_suffix = " (enhance failed)"
+                anon_suffix = ""
+                if anon:
+                    face_bbox = self.detect_face_bbox(resized_bgr)
+                    if face_bbox is None:
+                        anon_suffix = " (anon skipped)"
+                    else:
+                        resized_bgr = anonymize_face_inpaint(resized_bgr, face_bbox)
+                        anon_suffix = " (anon)"
+                strategy_k = f"{base_label}{anon_suffix}{enhance_suffix}"
+                if k == 0:
+                    first_full_label = strategy_k
+                out_pil = _bgr_to_pil(resized_bgr)
+                out_k = paths[k]
+                out_k.parent.mkdir(parents=True, exist_ok=True)
+                if out_k.suffix.lower() in {".jpg", ".jpeg"}:
+                    out_pil.save(out_k, format="JPEG", quality=95)
+                else:
+                    out_pil.save(out_k)
+
+            assert first_full_label is not None
+            strategy_used = first_full_label + (f" ×{n}" if n > 1 else "")
+
         except (OSError, ValueError) as exc:
             elapsed_ms = int((perf_counter() - t0) * 1000)
             dbg_written: Path | None = (
@@ -643,13 +796,15 @@ class ImageCropper:
             )
 
         elapsed_ms = int((perf_counter() - t0) * 1000)
+        out_paths_opt: tuple[Path, ...] | None = tuple(paths) if n > 1 else None
         return CropResult(
             input_path=input_path,
-            output_path=out,
+            output_path=paths[0],
             strategy_used=strategy_used,
             elapsed_ms=elapsed_ms,
             target_width=target_width,
             target_height=target_height,
             error=None,
             debug_output_path=debug_out,
+            output_paths=out_paths_opt,
         )

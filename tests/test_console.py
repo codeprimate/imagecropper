@@ -78,6 +78,26 @@ def test_progress_line_success() -> None:
     assert "12ms" in row
 
 
+def test_progress_line_success_multi_outputs_shows_more_suffix() -> None:
+    outs = (
+        Path("/out/a-cropped-01.jpg"),
+        Path("/out/a-cropped-02.jpg"),
+        Path("/out/a-cropped-03.jpg"),
+    )
+    r = CropResult(
+        input_path=Path("/in/a.jpg"),
+        output_path=outs[0],
+        strategy_used="human ×3",
+        elapsed_ms=9,
+        target_width=64,
+        target_height=64,
+        error=None,
+        output_paths=outs,
+    )
+    row = click.unstyle(progress_line(r))
+    assert "a-cropped-01.jpg (+2 more)" in row
+
+
 def test_progress_line_success_includes_debug_basename() -> None:
     r = CropResult(
         input_path=Path("/in/a.jpg"),

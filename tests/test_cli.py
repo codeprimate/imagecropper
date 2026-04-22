@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from click.testing import CliRunner
 from PIL import Image
@@ -144,6 +145,28 @@ def test_crop_center_verbose_shows_progress(tmp_path: Path) -> None:
     assert "a-cropped.jpg" in err
     assert "ok" in err
     assert "center" in err
+
+
+def test_crop_explicit_output_multi_subjects_error(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 20)).save(img)
+    out = tmp_path / "single.jpg"
+    p1 = np.ones((6, 6, 3), dtype=np.uint8)
+    p2 = p1 * 2
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "4", "-H", "4", "-s", "human", "-o", str(out), "--quiet"],
+    )
+    assert result.exit_code == 1
+    err = result.stderr or ""
+    assert "multiple subjects" in err.lower()
+    assert not out.exists()
 
 
 def test_crop_missing_file_exits_nonzero() -> None:

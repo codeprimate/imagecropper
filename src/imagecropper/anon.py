@@ -63,7 +63,11 @@ def _fill_expanded_bbox_oval(
 ) -> None:
     """Paint an axis-aligned ellipse on ``mask`` (inscribed in bbox, semi-axes + expand)."""
     axis_w, axis_h = _oval_semi_axes(
-        ex1, ey1, ex2, ey2, semi_axis_expand_px=semi_axis_expand_px,
+        ex1,
+        ey1,
+        ex2,
+        ey2,
+        semi_axis_expand_px=semi_axis_expand_px,
     )
     cx = (ex1 + ex2) // 2
     cy = (ey1 + ey2) // 2
@@ -150,7 +154,11 @@ def anonymize_face_inpaint(
     # Full-raster layer: a tight ROI clips Gaussian tails and leaves a hard *rectangle*
     # around the head; premult must be blurred and composited on the full frame.
     feather_half = _feather_kernel_half_px(
-        ex1, ey1, ex2, ey2, semi_axis_expand_px=_ANON_OVAL_EXPAND_PX,
+        ex1,
+        ey1,
+        ex2,
+        ey2,
+        semi_axis_expand_px=_ANON_OVAL_EXPAND_PX,
     )
     k_feather = 2 * feather_half + 1
 

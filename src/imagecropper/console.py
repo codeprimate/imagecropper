@@ -84,6 +84,8 @@ def progress_line(result: CropResult) -> str:
 
     assert result.output_path is not None
     out_base = result.output_path.name
+    if result.output_paths is not None and len(result.output_paths) > 1:
+        out_base = f"{out_base} (+{len(result.output_paths) - 1} more)"
     status = click.style("ok", fg="green", bold=True)
     strat = truncate_middle(result.strategy_used, 24)
     arrow = click.style("  →  ", fg="bright_black")

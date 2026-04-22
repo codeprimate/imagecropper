@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagecropper"
-version = "0.1.2"
+version = "0.2.0"
 description = "Small CLI for image cropping and related utilities"
 readme = "README.md"
 license = "MIT"
