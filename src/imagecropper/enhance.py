@@ -1,8 +1,7 @@
-"""GFPGAN face enhancement (optional ``[enhance]`` extra)."""
+"""GFPGAN face enhancement (core dependency)."""
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import types
 import warnings
@@ -125,12 +124,9 @@ def enhance_bgr_gfpgan(image_bgr: npt.NDArray[np.uint8], model_dir: Path) -> npt
     """Run GFPGAN on a BGR uint8 image; return BGR uint8 of the same shape.
 
     Raises:
-        ImportError: if the ``enhance`` extra is not installed.
         OSError, RuntimeError: on model load / inference failure (caller may fall back).
     """
     _compat_torchvision_for_basicsr()
-    if importlib.util.find_spec("gfpgan") is None:
-        raise ImportError("GFPGAN is not installed. Install with: uv sync --extra enhance")
 
     if image_bgr.size == 0:
         raise ValueError("empty image")

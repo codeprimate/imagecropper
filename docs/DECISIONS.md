@@ -15,6 +15,14 @@ Suggested shape for a standalone decision:
 ```
 
 
+## 2026-04-21 — GFPGAN as a core runtime dependency
+
+**Context:** Face restoration should work after a normal install without users opting into a separate **`[enhance]`** extra.
+
+**Decision:** Declare **gfpgan** in **`[project.dependencies]`** and remove the **`enhance`** optional dependency group from **`pyproject.toml`**.
+
+**Consequences:** Every standard install pulls GFPGAN and its transitive requirements; spec items **NFR-BLD-003**, **NFR-BLD-006**, and **CLI-005** / **CLI-009** are updated so **`(enhance failed)`** applies to runtime/model failures, not to a deliberately omitted optional extra.
+
 ## 2026-04-21 — Creative Commons BY-SA 4.0 for the repository
 
 **Context:** The project needed an explicit public license aligned with **share-alike** redistribution of adaptations.
@@ -61,8 +69,8 @@ Suggested shape for a standalone decision:
 ### Post-resize GFPGAN (`--enhance` / `--no-enhance`)
 
 - **Default:** enhancement **on**. Run **GFPGAN** on the **resized** output when enhancement is on, **`--anon`** is off, and SSD finds a face on that resized frame; **`--anon`** forces **no** GFPGAN (strategy label notes enhancement skipped for anon).
-- **Packaging:** **gfpgan** under optional **`[enhance]`**; cache **GFPGANv1.4.pth** under **`--model-dir`**.
-- **Resilience:** on enhancement failure (missing extra, load, inference), **save the unenhanced** resized image and record **`(enhance failed)`**; **`--no-enhance`** skips the GAN path entirely.
+- **Packaging:** **gfpgan** is a **core** dependency; cache **GFPGANv1.4.pth** under **`--model-dir`**.
+- **Resilience:** on enhancement failure (load, inference), **save the unenhanced** resized image and record **`(enhance failed)`**; **`--no-enhance`** skips the GAN path entirely.
 - **Compatibility:** small **torchvision** import shim for **basicsr** when **`torchvision.transforms.functional_tensor`** is absent.
 
 ### `crop --anon` (post-resize)

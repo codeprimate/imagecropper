@@ -2,9 +2,9 @@
 
 ## What this is
 
-Small **Python CLI** package (**Python 3.10+**, setuptools, `src/` layout). Primary command: **`imagecropper crop`** — fixed-size crops with person/face-aware selection, optional **face anonymization** (`--anon`), and optional **GFPGAN** post-resize enhancement (see `docs/SPEC.md`).
+Small **Python CLI** package (**Python 3.10+**, setuptools, `src/` layout). Primary command: **`imagecropper crop`** — fixed-size crops with person/face-aware selection, optional **face anonymization** (`--anon`), and **GFPGAN** post-resize enhancement by default (see `docs/SPEC.md`).
 
-Runtime stack includes **Click**, **Pillow**, **NumPy**, **OpenCV (headless)**, **PyTorch**, **Ultralytics (YOLO)** for detection, plus **requests** for model downloads. OpenCV SSD assets and **GFPGAN** weights cache under **`--model-dir`** (default **`~/.imagecropper`**); **YOLOv8m** (`yolov8m.pt`) is handled by **Ultralytics** (typically **cwd** or its **`weights_dir`**, not `imagecropper`’s model dir—see README). Optional **`enhance`** extra installs **GFPGAN** (`uv sync --extra enhance`); without it, crops still work and enhancement is skipped per the spec.
+Runtime stack includes **Click**, **Pillow**, **NumPy**, **OpenCV (headless)**, **PyTorch**, **Ultralytics (YOLO)** for detection, **gfpgan** for enhancement, plus **requests** for model downloads. OpenCV SSD assets and **GFPGAN** weights cache under **`--model-dir`** (default **`~/.imagecropper`**); **YOLOv8m** (`yolov8m.pt`) is handled by **Ultralytics** (typically **cwd** or its **`weights_dir`**, not `imagecropper`’s model dir—see README).
 
 There is **no GitHub Actions CI** in this repository yet; rely on local checks and pre-commit.
 
@@ -59,7 +59,7 @@ uv run pre-commit run --all-files
 uv run imagecropper --help
 ```
 
-For work that exercises **GFPGAN** paths, use `uv sync --extra dev --extra enhance` so the optional dependency is installed.
+**GFPGAN** is a core dependency; `uv sync --extra dev` is enough for tests and local development that hit enhancement paths.
 
 The mypy pre-commit hook is limited to `src/` so it does not need pytest stubs in the hook environment.
 

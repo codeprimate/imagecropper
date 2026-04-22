@@ -94,7 +94,7 @@ def cli(ctx: click.Context) -> None:
     "--enhance/--no-enhance",
     default=True,
     show_default=True,
-    help="After resize, GFPGAN-enhance if a face is detected (uv sync --extra enhance).",
+    help="After resize, GFPGAN-enhance if a face is detected (default: on).",
 )
 def crop_command(
     inputs: tuple[Path, ...],

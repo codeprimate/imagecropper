@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.1.0",
+    "gfpgan>=1.3.8",
     "numpy>=1.24.0",
     "opencv-python-headless>=4.8.0",
     "pillow>=10.0.0",
@@ -38,9 +39,6 @@ Repository = "https://github.com/codeprimate/imagecropper"
 Issues = "https://github.com/codeprimate/imagecropper/issues"
 
 [project.optional-dependencies]
-enhance = [
-    "gfpgan>=1.3.8",
-]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",

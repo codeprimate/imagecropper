@@ -999,6 +999,7 @@ version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "gfpgan" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "opencv-python-headless" },
@@ -1022,16 +1023,13 @@ dev = [
     { name = "types-pillow" },
     { name = "types-requests" },
 ]
-enhance = [
-    { name = "gfpgan" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.0" },
     { name = "click", specifier = ">=8.1.0" },
-    { name = "gfpgan", marker = "extra == 'enhance'", specifier = ">=1.3.8" },
+    { name = "gfpgan", specifier = ">=1.3.8" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "opencv-python-headless", specifier = ">=4.8.0" },
@@ -1048,7 +1046,7 @@ requires-dist = [
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.31.0" },
     { name = "ultralytics", specifier = ">=8.3.0" },
 ]
-provides-extras = ["enhance", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "imageio"
