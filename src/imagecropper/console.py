@@ -54,12 +54,12 @@ def banner_line1(
     meta_plain = logical_prefix[len(f"imagecropper {__version__}") :]
     head = click.style(f"imagecropper {__version__}", fg="cyan", bold=True)
     meta = click.style(meta_plain, fg="bright_black")
-    return head + meta + tail + click.style("", reset=True)
+    return str(head + meta + tail + click.style("", reset=True))
 
 
 def banner_separator() -> str:
     n = min(_term_width(), 120)
-    return click.style("─" * n, fg="bright_black")
+    return str(click.style("─" * n, fg="bright_black"))
 
 
 def progress_line(result: CropResult) -> str:
@@ -80,7 +80,7 @@ def progress_line(result: CropResult) -> str:
             f"{click.style(wxh, fg='bright_black')}  "
             f"{click.style(err, fg='red')}"
         )
-        return body + click.style("", reset=True)
+        return str(body + click.style("", reset=True))
 
     assert result.output_path is not None
     out_base = result.output_path.name
@@ -99,7 +99,7 @@ def progress_line(result: CropResult) -> str:
         f"{click.style(wxh, fg='bright_black')}"
         f"{dbg}"
     )
-    return line + click.style("", reset=True)
+    return str(line + click.style("", reset=True))
 
 
 def footer(ok: int, failed: int, total_seconds: float, output_dir: Path) -> str:
@@ -117,4 +117,4 @@ def footer(ok: int, failed: int, total_seconds: float, output_dir: Path) -> str:
     arrow = click.style(" → ", fg="bright_black")
     path = click.style(d_show, fg="cyan")
     line = f"  {ok_seg}{dot}{fail_seg}{dot}{time_s}{arrow}{path}"
-    return line + click.style("", reset=True)
+    return str(line + click.style("", reset=True))

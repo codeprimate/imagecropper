@@ -648,18 +648,24 @@ class ImageCropper:
         enhance: bool = True,
         *,
         debug: bool = False,
+        output_dir: Path | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> CropResult:
         """Load image, select region(s), resize, save. Returns timing and strategy used.
 
         When ``progress`` is set, it is called with short status strings (e.g. before
         region detection and before each per-subject resize/enhance/save step).
+
+        When ``output_dir`` is set and ``output_path`` is ``None``, implicit sidecar crop
+        paths are rooted under ``output_dir``. An explicit ``output_path`` always wins;
+        ``output_dir`` is ignored in that case.
         """
         t0 = perf_counter()
         stem = input_path.stem
         parent = input_path.parent
         debug_out: Path | None = (parent / f"{stem}-debug.jpg") if debug else None
         explicit_out = output_path is not None
+        crop_parent = parent if explicit_out or output_dir is None else output_dir
 
         overwrite_blocks: list[str] = []
         if explicit_out and output_path is not None and output_path.exists() and not overwrite:
@@ -713,10 +719,10 @@ class ImageCropper:
             if n == 1 and explicit_out and output_path is not None:
                 paths = [output_path]
             elif n == 1:
-                paths = [parent / f"{stem}-cropped.jpg"]
+                paths = [crop_parent / f"{stem}-cropped.jpg"]
             else:
                 pad_w = max(2, len(str(n)))
-                paths = [parent / f"{stem}-cropped-{i:0{pad_w}d}.jpg" for i in range(1, n + 1)]
+                paths = [crop_parent / f"{stem}-cropped-{i:0{pad_w}d}.jpg" for i in range(1, n + 1)]
 
             phase2_blocks: list[str] = []
             for p in paths:

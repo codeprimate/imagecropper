@@ -183,6 +183,52 @@ def test_crop_explicit_output_path(tmp_path: Path) -> None:
     assert custom.exists()
 
 
+def test_crop_one_output_dir_implicit_sidecar(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    out_dir = tmp_path / "gathered"
+    out_dir.mkdir()
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(
+        inp,
+        3,
+        3,
+        "center",
+        None,
+        True,
+        enhance=False,
+        output_dir=out_dir,
+    )
+    assert r.error is None
+    expected = out_dir / "x-cropped.jpg"
+    assert r.output_path == expected
+    assert expected.exists()
+    assert not (tmp_path / "x-cropped.jpg").exists()
+
+
+def test_crop_one_explicit_output_ignores_output_dir(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    custom = tmp_path / "custom.jpg"
+    decoy_dir = tmp_path / "ignored"
+    decoy_dir.mkdir()
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(
+        inp,
+        3,
+        3,
+        "center",
+        custom,
+        True,
+        enhance=False,
+        output_dir=decoy_dir,
+    )
+    assert r.error is None
+    assert r.output_path == custom
+    assert custom.exists()
+    assert not (decoy_dir / "x-cropped.jpg").exists()
+
+
 def test_select_region_unknown_strategy() -> None:
     cropper = ImageCropper(model_dir=Path("/tmp"))
     img = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -704,9 +750,7 @@ def test_crop_one_progress_emits_per_crop(tmp_path: Path, mocker: Any) -> None:
     def _cb(msg: str) -> None:
         lines.append(msg)
 
-    r = cropper.crop_one(
-        inp, 4, 4, "human", None, True, enhance=False, progress=_cb
-    )
+    r = cropper.crop_one(inp, 4, 4, "human", None, True, enhance=False, progress=_cb)
     assert r.error is None
     assert any("selecting crop regions" in x for x in lines)
     assert sum(1 for x in lines if "crop 1/2" in x) == 1

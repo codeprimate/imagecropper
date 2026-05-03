@@ -87,6 +87,15 @@ def cli(ctx: click.Context) -> None:
     help="Explicit output path (only when a single INPUT is given).",
 )
 @click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Directory for crop JPEGs when --output is omitted (same basenames as sidecar "
+        "files); incompatible with -o. Debug JPEGs stay beside each input."
+    ),
+)
+@click.option(
     "--force",
     is_flag=True,
     default=False,
@@ -123,6 +132,7 @@ def crop_command(
     strategy: str,
     model_dir: Path | None,
     output: Path | None,
+    output_dir: Path | None,
     force: bool,
     quiet: bool,
     anon: bool,
@@ -134,6 +144,8 @@ def crop_command(
         raise click.BadParameter("width and height must be positive integers")
 
     input_paths = list(inputs)
+    if output is not None and output_dir is not None:
+        raise click.UsageError("--output and --output-dir cannot be used together")
     if output is not None and len(input_paths) != 1:
         raise click.UsageError("--output requires exactly one INPUT")
 
@@ -168,6 +180,7 @@ def crop_command(
             anon=anon,
             enhance=enhance,
             debug=debug,
+            output_dir=output_dir,
             progress=_crop_progress if not quiet else None,
         )
         results.append(result)

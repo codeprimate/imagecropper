@@ -51,6 +51,7 @@ def test_crop_help() -> None:
     assert "--enhance" in result.output
     assert "--no-enhance" in result.output
     assert "--debug" in result.output
+    assert "--output-dir" in result.output
 
 
 def test_crop_debug_writes_debug_jpeg(tmp_path: Path) -> None:
@@ -90,6 +91,129 @@ def test_crop_output_requires_single_input(tmp_path: Path) -> None:
         ["crop", str(a), str(b), "--width", "2", "--height", "2", "-o", str(tmp_path / "o.jpg")],
     )
     assert result.exit_code != 0
+
+
+def test_crop_output_and_output_dir_mutually_exclusive(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (4, 4)).save(img)
+    out = tmp_path / "o.jpg"
+    out_dir = tmp_path / "outdir"
+    out_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "--width",
+            "2",
+            "--height",
+            "2",
+            "-s",
+            "center",
+            "-o",
+            str(out),
+            "--output-dir",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code != 0
+    err = result.stderr or ""
+    assert "output" in err.lower() and "output-dir" in err.lower()
+
+
+def test_crop_output_dir_writes_beside_out_dir_not_input(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    out_dir = tmp_path / "outdir"
+    out_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "5",
+            "-H",
+            "5",
+            "-s",
+            "center",
+            "--output-dir",
+            str(out_dir),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    assert (out_dir / "a-cropped.jpg").exists()
+    assert not (tmp_path / "a-cropped.jpg").exists()
+
+
+def test_crop_output_dir_two_inputs(tmp_path: Path) -> None:
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (10, 10)).save(a)
+    Image.new("RGB", (10, 10)).save(b)
+    out_dir = tmp_path / "outdir"
+    out_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(a),
+            str(b),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--output-dir",
+            str(out_dir),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    assert (out_dir / "a-cropped.jpg").exists()
+    assert (out_dir / "b-cropped.jpg").exists()
+
+
+def test_crop_output_dir_same_stem_collision_refuses_overwrite(
+    tmp_path: Path,
+) -> None:
+    d1 = tmp_path / "d1"
+    d2 = tmp_path / "d2"
+    d1.mkdir()
+    d2.mkdir()
+    a1 = d1 / "x.png"
+    a2 = d2 / "x.png"
+    Image.new("RGB", (10, 10)).save(a1)
+    Image.new("RGB", (10, 10)).save(a2)
+    out_dir = tmp_path / "outdir"
+    out_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(a1),
+            str(a2),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--output-dir",
+            str(out_dir),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 1
+    assert (out_dir / "x-cropped.jpg").exists()
+    err = result.stderr or ""
+    assert "overwrite" in err.lower()
 
 
 def test_crop_defaults_to_1024_without_dimensions(tmp_path: Path) -> None:

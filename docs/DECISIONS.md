@@ -4,6 +4,14 @@ Record **architectural and behavioral decisions** here so future work does not r
 
 **Newest first.** Related choices that landed the same day **may** be merged into one dated section (subsections + a short consequences line) instead of many micro-entries.
 
+## 2026-05-03 — `crop --output-dir` vs basename collisions
+
+**Context:** Users asked to gather crops from many inputs into one directory; default naming uses ``{stem}-cropped.jpg`` only, so two inputs with the same basename (e.g. ``dir1/a.jpg`` and ``dir2/a.jpg``) would target the same path under a shared ``--output-dir``.
+
+**Decision:** Add optional ``--output-dir`` (mutually exclusive with ``-o``). Primary crops use the same sidecar basenames under that directory; debug JPEGs stay beside each input (**DATA-006**). **No** CLI preflight for duplicate targets: the **existing** phase-2 overwrite refusal applies to the second conflicting write unless ``--force`` is set.
+
+**Consequences:** **CLI-005**, **CLI-006** in ``docs/SPEC.md``; ``crop_one`` accepts optional ``output_dir`` (explicit ``output_path`` wins when both are passed at the API).
+
 ## 2026-04-21 — Verbose stderr: per-crop progress callback
 
 **Context:** Long-running ``crop_one`` (YOLO, GFPGAN, multiple subjects) produced no stderr until the full per-input summary line, which felt unresponsive under captured stderr.
