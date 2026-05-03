@@ -4,6 +4,22 @@ Record **architectural and behavioral decisions** here so future work does not r
 
 **Newest first.** Related choices that landed the same day **may** be merged into one dated section (subsections + a short consequences line) instead of many micro-entries.
 
+## 2026-05-03 — `crop` / `anon` output ``--format`` and ``--quality``
+
+**Context:** Callers wanted alternative encodings (WebP, PNG) and a quality knob without changing the existing JPEG behavior. WebP in particular is preferred lossy at the slowest/best-compression setting; PNG is lossless and has no comparable knob.
+
+**Decision:** Add ``--format / -f`` (``jpg`` default, ``webp``, ``png``) and ``--quality / -q`` (positive int in ``1..100``) to ``crop`` and ``anon`` (full-frame and ``--crop``). The chosen format drives **both** the encoder **and** the file extension for sidecar primary crops (``{stem}-cropped.{ext}``, ``{stem}-cropped-NN.{ext}``), the ``anon`` sidecar (``{stem}-anon.{ext}``), and the ``--debug`` overlay (``{stem}-debug.{ext}``). When ``-o`` / ``--output`` is given, its suffix is **rewritten** to match ``--format`` (e.g. ``-o foo.jpg --format png`` writes ``foo.png``); ``.jpg`` and ``.jpeg`` are both treated as already-jpg. WebP is encoded lossy with Pillow ``method=6`` (slowest, best compression) and ``lossless=False``; the user-facing knob is just ``--quality``. PNG is lossless: ``--quality`` is **accepted but silently ignored** (no separate ``compress_level`` knob to keep the surface small). Default ``--quality`` is **per-format**: ``95`` for jpg (matches the old hard-coded default), ``90`` for webp, N/A for png. Out-of-range ``--quality`` is a Click usage error.
+
+**Consequences:** **CLI-005**, **CLI-006**, **CLI-010**, **CLI-011**, **DATA-001**, **DATA-006** plus new **DATA-008** in ``docs/SPEC.md``; ``crop_one`` / ``anon_one`` / ``write_crop_debug_jpeg`` accept ``output_format`` and ``quality`` kwargs; README options tables and the "Outputs:" blurb gain the new flags.
+
+## 2026-05-03 — `anon` subcommand (full-frame vs `--crop`)
+
+**Context:** Callers wanted face anonymization without changing framing or resolution; they also wanted a single obvious way to get the existing crop+anon pipeline.
+
+**Decision:** Add CLI ``anon``: default mode loads the full image, runs the same SSD + **CLI-008** inpaint stack on the native-sized raster (highest-confidence face only, unchanged from ``crop --anon``), writes ``{stem}-anon.jpg``, and **never** runs GFPGAN. Flag ``--crop`` reuses ``crop``’s width/height/strategy/enhance/debug options and calls ``crop_one(..., anon=True)``, so ``anon --crop …`` matches ``crop --anon …``. Supplying crop-only flags without ``--crop`` is a usage error.
+
+**Consequences:** **CLI-010**–**CLI-012**, **DATA-007**, **ERR-002**; new ``ImageCropper.anon_one``.
+
 ## 2026-05-03 — `crop --output-dir` vs basename collisions
 
 **Context:** Users asked to gather crops from many inputs into one directory; default naming uses ``{stem}-cropped.jpg`` only, so two inputs with the same basename (e.g. ``dir1/a.jpg`` and ``dir2/a.jpg``) would target the same path under a shared ``--output-dir``.

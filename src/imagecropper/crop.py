@@ -24,6 +24,7 @@ from imagecropper.models import (
 )
 
 StrategyName = Literal["auto", "human", "face", "center"]
+OutputFormat = Literal["jpg", "webp", "png"]
 
 # COCO 80-class id for Ultralytics COCO pretrained detectors
 _COCO_PERSON_CLASS = 0
@@ -37,6 +38,48 @@ _FACE_CONFIDENCE_THRESHOLD = 0.5
 _FACE_BBOX_PAD_X = 0.15
 _FACE_BBOX_PAD_TOP = 0.2
 _FACE_BBOX_PAD_BOTTOM = 0.2
+
+# Output encoding (DATA-008). WebP method=6 is slowest / best compression.
+_FORMAT_EXTENSION: dict[OutputFormat, str] = {"jpg": ".jpg", "webp": ".webp", "png": ".png"}
+_FORMAT_DEFAULT_QUALITY: dict[OutputFormat, int | None] = {"jpg": 95, "webp": 90, "png": None}
+_JPEG_SUFFIXES = {".jpg", ".jpeg"}
+_WEBP_METHOD_SLOW = 6
+
+
+def _extension_for(fmt: OutputFormat) -> str:
+    return _FORMAT_EXTENSION[fmt]
+
+
+def _resolve_quality(fmt: OutputFormat, quality: int | None) -> int | None:
+    """User ``--quality`` for jpg/webp, ``None`` for png (lossless)."""
+    if fmt == "png":
+        return None
+    return quality if quality is not None else _FORMAT_DEFAULT_QUALITY[fmt]
+
+
+def _apply_format_to_explicit_path(path: Path, fmt: OutputFormat) -> Path:
+    """Force ``path``'s suffix to match ``fmt`` (DATA-008): preserves ``.jpeg`` for jpg."""
+    suffix = path.suffix.lower()
+    if fmt == "jpg" and suffix in _JPEG_SUFFIXES:
+        return path
+    return path.with_suffix(_extension_for(fmt))
+
+
+def _save_pil_image(pil: Image.Image, path: Path, fmt: OutputFormat, quality: int | None) -> None:
+    """Single chokepoint for writing outputs per DATA-008."""
+    resolved = _resolve_quality(fmt, quality)
+    if fmt == "jpg":
+        pil.save(path, format="JPEG", quality=resolved)
+    elif fmt == "webp":
+        pil.save(
+            path,
+            format="WEBP",
+            quality=resolved,
+            method=_WEBP_METHOD_SLOW,
+            lossless=False,
+        )
+    else:
+        pil.save(path, format="PNG")
 
 
 @dataclass(frozen=True)
@@ -142,8 +185,10 @@ def write_crop_debug_jpeg(
     image_bgr: npt.NDArray[np.uint8],
     labeled_boxes: list[tuple[str, tuple[int, int, int, int]]],
     out_path: Path,
+    output_format: OutputFormat = "jpg",
+    quality: int | None = None,
 ) -> None:
-    """Draw ``labeled_boxes`` on a copy of ``image_bgr`` and save as JPEG (BGR in, RGB file)."""
+    """Draw ``labeled_boxes`` on a copy of ``image_bgr`` and save per ``output_format`` (DATA-008)."""
     vis = image_bgr.copy()
     h_img, w_img = vis.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -247,7 +292,12 @@ def write_crop_debug_jpeg(
                 )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_pil = _bgr_to_pil(vis)
-    out_pil.save(out_path, format="JPEG", quality=92)
+    # Debug overlay defaults to JPEG quality=92 when no explicit quality is given for jpg, matching
+    # the historical compact-but-readable preview; webp/png use the format's standard defaults.
+    if output_format == "jpg" and quality is None:
+        out_pil.save(out_path, format="JPEG", quality=92)
+        return
+    _save_pil_image(out_pil, out_path, output_format, quality)
 
 
 def _expand_bbox_to_aspect_crop(
@@ -650,6 +700,8 @@ class ImageCropper:
         debug: bool = False,
         output_dir: Path | None = None,
         progress: Callable[[str], None] | None = None,
+        output_format: OutputFormat = "jpg",
+        quality: int | None = None,
     ) -> CropResult:
         """Load image, select region(s), resize, save. Returns timing and strategy used.
 
@@ -659,12 +711,19 @@ class ImageCropper:
         When ``output_dir`` is set and ``output_path`` is ``None``, implicit sidecar crop
         paths are rooted under ``output_dir``. An explicit ``output_path`` always wins;
         ``output_dir`` is ignored in that case.
+
+        ``output_format`` and ``quality`` map to encoder parameters per **DATA-008**;
+        sidecar paths use the format's extension and explicit ``output_path`` has its
+        suffix forced to match (``.jpg``/``.jpeg`` already match ``jpg``).
         """
         t0 = perf_counter()
         stem = input_path.stem
         parent = input_path.parent
-        debug_out: Path | None = (parent / f"{stem}-debug.jpg") if debug else None
+        ext = _extension_for(output_format)
+        debug_out: Path | None = (parent / f"{stem}-debug{ext}") if debug else None
         explicit_out = output_path is not None
+        if explicit_out and output_path is not None:
+            output_path = _apply_format_to_explicit_path(output_path, output_format)
         crop_parent = parent if explicit_out or output_dir is None else output_dir
 
         overwrite_blocks: list[str] = []
@@ -692,7 +751,7 @@ class ImageCropper:
                 boxes = self.debug_annotation_boxes(
                     image_bgr, strategy, target_width, target_height
                 )
-                write_crop_debug_jpeg(image_bgr, boxes, debug_out)
+                write_crop_debug_jpeg(image_bgr, boxes, debug_out, output_format, quality)
 
             if progress is not None:
                 progress(f"{input_path.name}: selecting crop regions...")
@@ -711,7 +770,7 @@ class ImageCropper:
                     target_height=target_height,
                     error=(
                         "multiple subjects detected; a single --output path cannot name more than "
-                        f"one crop; omit --output to write sidecar files ({stem}-cropped-01.jpg, ...)"
+                        f"one crop; omit --output to write sidecar files ({stem}-cropped-01{ext}, ...)"
                     ),
                     debug_output_path=dbg_multi,
                 )
@@ -719,10 +778,12 @@ class ImageCropper:
             if n == 1 and explicit_out and output_path is not None:
                 paths = [output_path]
             elif n == 1:
-                paths = [crop_parent / f"{stem}-cropped.jpg"]
+                paths = [crop_parent / f"{stem}-cropped{ext}"]
             else:
                 pad_w = max(2, len(str(n)))
-                paths = [crop_parent / f"{stem}-cropped-{i:0{pad_w}d}.jpg" for i in range(1, n + 1)]
+                paths = [
+                    crop_parent / f"{stem}-cropped-{i:0{pad_w}d}{ext}" for i in range(1, n + 1)
+                ]
 
             phase2_blocks: list[str] = []
             for p in paths:
@@ -777,10 +838,7 @@ class ImageCropper:
                 out_pil = _bgr_to_pil(resized_bgr)
                 out_k = paths[k]
                 out_k.parent.mkdir(parents=True, exist_ok=True)
-                if out_k.suffix.lower() in {".jpg", ".jpeg"}:
-                    out_pil.save(out_k, format="JPEG", quality=95)
-                else:
-                    out_pil.save(out_k)
+                _save_pil_image(out_pil, out_k, output_format, quality)
 
             assert first_full_label is not None
             strategy_used = first_full_label + (f" ×{n}" if n > 1 else "")
@@ -813,4 +871,99 @@ class ImageCropper:
             error=None,
             debug_output_path=debug_out,
             output_paths=out_paths_opt,
+        )
+
+    def anon_one(
+        self,
+        input_path: Path,
+        output_path: Path | None,
+        overwrite: bool,
+        *,
+        output_dir: Path | None = None,
+        progress: Callable[[str], None] | None = None,
+        output_format: OutputFormat = "jpg",
+        quality: int | None = None,
+    ) -> CropResult:
+        """Full-frame face anonymization only: no crop, resize, or GFPGAN.
+
+        Writes ``{stem}-anon.{ext}`` beside the input unless ``output_path`` or
+        ``output_dir`` overrides the directory (same layout rules as ``crop_one``).
+        ``output_format`` and ``quality`` map to encoder parameters per **DATA-008**.
+        """
+        t0 = perf_counter()
+        stem = input_path.stem
+        parent = input_path.parent
+        ext = _extension_for(output_format)
+        explicit_out = output_path is not None
+        if explicit_out and output_path is not None:
+            output_path = _apply_format_to_explicit_path(output_path, output_format)
+        out_parent = parent if explicit_out or output_dir is None else output_dir
+        path_out = (
+            output_path
+            if explicit_out and output_path is not None
+            else out_parent / f"{stem}-anon{ext}"
+        )
+
+        if path_out.exists() and not overwrite:
+            elapsed_ms = int((perf_counter() - t0) * 1000)
+            return CropResult(
+                input_path=input_path,
+                output_path=None,
+                strategy_used="",
+                elapsed_ms=elapsed_ms,
+                target_width=0,
+                target_height=0,
+                error="refusing to overwrite existing file(s): " + str(path_out),
+            )
+
+        target_w = 0
+        target_h = 0
+        try:
+            if progress is not None:
+                progress(f"{input_path.name}: loading...")
+            with Image.open(input_path) as pil:
+                pil.load()
+                image_bgr = _pil_to_bgr(pil)
+            h_img, w_img = image_bgr.shape[:2]
+            target_w, target_h = w_img, h_img
+
+            if progress is not None:
+                progress(f"{input_path.name}: detecting face...")
+            face_bbox = self.detect_face_bbox(image_bgr)
+            if face_bbox is None:
+                anon_suffix = " (anon skipped)"
+                out_bgr = image_bgr
+            else:
+                anon_suffix = " (anon)"
+                if progress is not None:
+                    progress(f"{input_path.name}: anonymizing...")
+                out_bgr = anonymize_face_inpaint(image_bgr, face_bbox)
+            strategy_used = f"anon{anon_suffix}"
+
+            out_pil = _bgr_to_pil(out_bgr)
+            path_out.parent.mkdir(parents=True, exist_ok=True)
+            _save_pil_image(out_pil, path_out, output_format, quality)
+
+        except (OSError, ValueError) as exc:
+            elapsed_ms = int((perf_counter() - t0) * 1000)
+            return CropResult(
+                input_path=input_path,
+                output_path=None,
+                strategy_used="",
+                elapsed_ms=elapsed_ms,
+                target_width=target_w,
+                target_height=target_h,
+                error=str(exc),
+            )
+
+        elapsed_ms = int((perf_counter() - t0) * 1000)
+        return CropResult(
+            input_path=input_path,
+            output_path=path_out,
+            strategy_used=strategy_used,
+            elapsed_ms=elapsed_ms,
+            target_width=target_w,
+            target_height=target_h,
+            error=None,
+            debug_output_path=None,
         )

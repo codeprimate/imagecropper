@@ -59,6 +59,32 @@ def test_banner_and_separator() -> None:
     assert len(click.unstyle(banner_separator())) >= 60
 
 
+def test_banner_native_anon_command() -> None:
+    line = banner_line1("auto", Path("/tmp/models"), 0, 0, command_label="anon", native_output=True)
+    plain = click.unstyle(line)
+    assert "anon" in plain
+    assert "out=native" in plain
+    assert "strategy=auto" not in plain
+    assert "enhance=off" in plain
+
+
+def test_banner_anon_crop_command_label() -> None:
+    line = banner_line1(
+        "center",
+        Path("/tmp/m"),
+        8,
+        8,
+        anon=True,
+        enhance=True,
+        command_label="anon",
+    )
+    plain = click.unstyle(line)
+    assert "anon" in plain
+    assert "out=8x8" in plain
+    assert "strategy=center" in plain
+    assert "anon=on" in plain
+
+
 def test_progress_line_success() -> None:
     r = CropResult(
         input_path=Path("/in/a.jpg"),

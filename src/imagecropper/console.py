@@ -41,14 +41,21 @@ def banner_line1(
     *,
     anon: bool = False,
     enhance: bool = True,
+    command_label: str = "crop",
+    native_output: bool = False,
 ) -> str:
     model_display = model_dir.expanduser().as_posix()
-    anon_part = " anon=on" if anon else ""
-    enhance_part = " enhance=off" if not enhance else ""
-    logical_prefix = (
-        f"imagecropper {__version__}  crop  out={out_width}x{out_height}  "
-        f"strategy={strategy}{anon_part}{enhance_part}  model_dir="
-    )
+    if native_output:
+        out_part = "out=native"
+        strat_part = ""
+        anon_part = ""
+        enhance_part = " enhance=off"
+    else:
+        out_part = f"out={out_width}x{out_height}"
+        strat_part = f"  strategy={strategy}"
+        anon_part = " anon=on" if anon else ""
+        enhance_part = " enhance=off" if not enhance else ""
+    logical_prefix = f"imagecropper {__version__}  {command_label}  {out_part}{strat_part}{anon_part}{enhance_part}  model_dir="
     avail = max(12, _term_width() - len(logical_prefix))
     tail = truncate_middle(model_display, avail)
     meta_plain = logical_prefix[len(f"imagecropper {__version__}") :]

@@ -1,10 +1,10 @@
 # imagecropper
 
-**imagecropper** is a small command-line tool that crops images to a **fixed width and height** (defaults: **1024×1024**). It tries to keep **people and faces** in frame using detectors, can **blur faces** on the result (`--anon`), and by default **sharpens faces** on the resized output with **GFPGAN** when a face is detected (turn off with `--no-enhance`).
+**imagecropper** is a small command-line tool that crops images to a **fixed width and height** (defaults: **1024×1024**). It tries to keep **people and faces** in frame using detectors, can **blur faces** on the result (`crop --anon` or the **`anon`** command: full-frame with **`anon`**, or same as **`crop --anon`** with **`anon --crop`**), and by default **sharpens faces** on the resized output with **GFPGAN** when a face is detected (turn off with `--no-enhance`).
 
 - **Python 3.10+**
 - **Entry point:** `imagecropper` (same behavior as `python -m imagecropper`)
-- **Outputs:** JPEG by default (`{input-stem}-cropped.jpg` beside each input); see [Quick start](#quick-start)
+- **Outputs:** JPEG by default (`{input-stem}-cropped.jpg` beside each input). Pick `--format jpg|webp|png` (extension follows the format) and tune `--quality 1..100` (default **95** for jpg, **90** for webp; ignored for png since PNG is lossless). See [Quick start](#quick-start)
 
 **On this page:** [Requirements](#requirements) · [Install](#install) · [First-run downloads](#first-run-downloads-approximate-sizes) · [Quick start](#quick-start) · [Commands](#commands) · [Enhancement](#enhancement) · [Development](#development) · [Documentation](#documentation) · [License](#license) · [Status](#status)
 
@@ -118,6 +118,7 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 |--------|---------|
 | `imagecropper` | Print top-level help and exit `0`. |
 | `imagecropper crop …` | Crop each input to `--width` × `--height` (defaults **1024**). |
+| `imagecropper anon …` | Full-frame face anonymization only (writes `{stem}-anon.jpg`); add `--crop` for the same pipeline as `crop --anon`. |
 
 ### `crop` options (summary)
 
@@ -132,14 +133,25 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 | `--quiet` | Less chatter on stderr. |
 | `--anon` | After crop and resize: inpaint + blur inside an expanded SSD face oval on the output-sized frame. |
 | `--enhance` / `--no-enhance` | Post-resize GFPGAN when a face is seen on the resized image (default: **on**; skipped with `--anon` or if deps/models fail). |
-| `--debug` | Write `{input-stem}-debug.jpg` next to each input: full-resolution source with detector/crop rectangles and corner `(x,y)` labels (see [docs/SPEC.md](docs/SPEC.md) **DATA-006**). |
+| `-f`, `--format` | Output format: `jpg` (default), `webp` (lossy, slowest/best compression), or `png` (lossless). Drives both encoder and file extension; with `-o` the supplied path's suffix is rewritten to match. See **DATA-008** in [docs/SPEC.md](docs/SPEC.md). |
+| `-q`, `--quality` | Encoder quality `1..100`; defaults **95** for jpg and **90** for webp. Accepted but silently ignored for png (lossless). |
+| `--debug` | Write `{input-stem}-debug.{ext}` next to each input: full-resolution source with detector/crop rectangles and corner `(x,y)` labels (see [docs/SPEC.md](docs/SPEC.md) **DATA-006**). Encoded per `--format` / `--quality`. |
 
 Default output when `-o` is omitted: `{input-stem}-cropped.jpg` next to each input (or under `--output-dir`) when there is a single subject crop; if several people or several faces are detected, numbered files `{stem}-cropped-01.jpg`, … are written instead (see **CLI-006** in the spec).
+
+### `anon` (summary)
+
+| Option | Description |
+|--------|-------------|
+| `--crop` | Run crop + resize + post-resize anonymize (same as `crop --anon`); required to use `-W`/`-H`, `-s`, `--no-enhance`, or `--debug`. |
+| `-W`, `-H`, `-s`, `--enhance` / `--no-enhance`, `--debug` | Same meanings as `crop` when combined with `--crop`. |
+| `-f`, `--format`, `-q`, `--quality` | Same meanings as `crop`; apply to both full-frame and `--crop` modes. Full-frame sidecar is `{stem}-anon.{ext}`. |
+| `--model-dir`, `-o`, `--output-dir`, `--force`, `--quiet` | Same layout as `crop` (full-frame mode writes `{stem}-anon.{ext}`). |
 
 ### Exit codes
 
 - **0** — all inputs processed successfully for that command.
-- **1** — `crop`: one or more inputs failed (all inputs are still attempted).
+- **1** — `crop` or `anon`: one or more inputs failed (all inputs are still attempted).
 - Non-zero — Click usage / bad parameters.
 
 ---

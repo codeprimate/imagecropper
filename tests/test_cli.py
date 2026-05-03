@@ -398,3 +398,233 @@ def test_footer_output_dir_all_failed() -> None:
         )
     ]
     assert _footer_output_dir(results) == Path.cwd()
+
+
+def test_anon_help_lists_crop() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli, ["anon", "--help"])
+    assert result.exit_code == 0
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert "--crop" in combined
+
+
+def test_anon_native_rejects_strategy_without_crop(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (4, 4)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["anon", str(img), "-s", "center", "--quiet"])
+    assert result.exit_code != 0
+    assert "--crop" in (result.stderr or "")
+
+
+def test_anon_native_writes_sidecar(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (16, 16)).save(img)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["anon", str(img), "--quiet"])
+    assert result.exit_code == 0
+    assert (tmp_path / "a-anon.jpg").exists()
+
+
+def test_anon_crop_matches_crop_anon_bytes(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (24, 24)).save(img)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=(4, 4, 16, 16))
+    mocker.patch(
+        "imagecropper.crop.anonymize_face_inpaint",
+        side_effect=lambda im, bb: im,
+    )
+    runner = CliRunner()
+    r1 = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "9", "-H", "9", "-s", "center", "--anon", "--force", "--quiet"],
+    )
+    assert r1.exit_code == 0
+    out = tmp_path / "a-cropped.jpg"
+    b1 = out.read_bytes()
+    r2 = runner.invoke(
+        cli,
+        ["anon", str(img), "--crop", "-W", "9", "-H", "9", "-s", "center", "--force", "--quiet"],
+    )
+    assert r2.exit_code == 0
+    assert out.read_bytes() == b1
+
+
+def test_crop_format_webp_writes_webp(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "5", "-H", "5", "-s", "center", "--format", "webp", "--quiet"],
+    )
+    assert result.exit_code == 0
+    out = tmp_path / "a-cropped.webp"
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.format == "WEBP"
+
+
+def test_crop_format_png_writes_png(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "5", "-H", "5", "-s", "center", "-f", "png", "--quiet"],
+    )
+    assert result.exit_code == 0
+    out = tmp_path / "a-cropped.png"
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.format == "PNG"
+
+
+def test_crop_explicit_output_suffix_rewritten_via_cli(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    requested = tmp_path / "out.jpg"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "5",
+            "-H",
+            "5",
+            "-s",
+            "center",
+            "-o",
+            str(requested),
+            "--format",
+            "png",
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    assert (tmp_path / "out.png").exists()
+    assert not requested.exists()
+
+
+def test_crop_quality_below_range_rejected(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (4, 4)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "2", "-H", "2", "-s", "center", "--quality", "0"],
+    )
+    assert result.exit_code != 0
+
+
+def test_crop_quality_above_range_rejected(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (4, 4)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["crop", str(img), "-W", "2", "-H", "2", "-s", "center", "--quality", "101"],
+    )
+    assert result.exit_code != 0
+
+
+def test_crop_png_with_quality_is_accepted(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (8, 8)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "-f",
+            "png",
+            "-q",
+            "50",
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    out = tmp_path / "a-cropped.png"
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.format == "PNG"
+
+
+def test_anon_native_format_writes_extension(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (16, 16)).save(img)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["anon", str(img), "-f", "webp", "--quiet"])
+    assert result.exit_code == 0
+    out = tmp_path / "a-anon.webp"
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.format == "WEBP"
+
+
+def test_anon_crop_format_writes_extension(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (24, 24)).save(img)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "anon",
+            str(img),
+            "--crop",
+            "-W",
+            "8",
+            "-H",
+            "8",
+            "-s",
+            "center",
+            "-f",
+            "png",
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    out = tmp_path / "a-cropped.png"
+    assert out.exists()
+    with Image.open(out) as pil:
+        assert pil.format == "PNG"
+
+
+def test_crop_debug_with_format_writes_debug_extension(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30)).save(img)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "5",
+            "-H",
+            "5",
+            "-s",
+            "center",
+            "--debug",
+            "-f",
+            "webp",
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0
+    dbg = tmp_path / "a-debug.webp"
+    assert dbg.exists()
+    with Image.open(dbg) as pil:
+        assert pil.format == "WEBP"

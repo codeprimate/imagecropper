@@ -11,9 +11,12 @@ from imagecropper.crop import (
     _HUMAN_YOLO_WEIGHTS,
     CropResult,
     ImageCropper,
+    _apply_format_to_explicit_path,
     _expand_bbox_to_aspect_crop,
+    _extension_for,
     _pad_detection_bbox,
     _pil_to_bgr,
+    _resolve_quality,
     write_crop_debug_jpeg,
 )
 
@@ -175,7 +178,7 @@ def test_debug_annotation_boxes_center(tmp_path: Path) -> None:
 def test_crop_explicit_output_path(tmp_path: Path) -> None:
     inp = tmp_path / "x.png"
     _rgb_png(inp, 10, 10)
-    custom = tmp_path / "out" / "custom.png"
+    custom = tmp_path / "out" / "custom.jpg"
     cropper = ImageCropper(model_dir=tmp_path)
     r = cropper.crop_one(inp, 3, 3, "center", custom, True, enhance=False)
     assert r.error is None
@@ -643,6 +646,60 @@ def test_crop_one_anon_skipped_no_face(tmp_path: Path, mocker: Any) -> None:
     assert r.strategy_used == "center (anon skipped) (enhance skipped: anon)"
 
 
+def test_anon_one_inpaint_when_face(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 30, 30)
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=(5, 5, 15, 15))
+    anon_mock = mocker.patch(
+        "imagecropper.crop.anonymize_face_inpaint",
+        side_effect=lambda im, bb: im,
+    )
+    r = cropper.anon_one(inp, None, True)
+    assert r.error is None
+    anon_mock.assert_called_once()
+    assert r.output_path == tmp_path / "x-anon.jpg"
+    assert r.strategy_used == "anon (anon)"
+    assert r.target_width == 30 and r.target_height == 30
+
+
+def test_anon_one_skipped_no_face(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    anon_mock = mocker.patch("imagecropper.crop.anonymize_face_inpaint")
+    r = cropper.anon_one(inp, None, True)
+    assert r.error is None
+    anon_mock.assert_not_called()
+    assert r.strategy_used == "anon (anon skipped)"
+
+
+def test_anon_one_refuses_overwrite(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 8, 8)
+    out = tmp_path / "x-anon.jpg"
+    out.write_bytes(b"exists")
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    r = cropper.anon_one(inp, None, False)
+    assert r.error is not None
+    assert "overwrite" in r.error.lower()
+
+
+def test_anon_one_output_dir(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "sub" / "x.png"
+    inp.parent.mkdir()
+    _rgb_png(inp, 12, 10)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    r = cropper.anon_one(inp, None, True, output_dir=out_dir)
+    assert r.error is None
+    assert r.output_path == out_dir / "x-anon.jpg"
+
+
 def test_detect_face_bbox_low_confidence(tmp_path: Path, mocker: Any) -> None:
     cropper = ImageCropper(model_dir=tmp_path)
     net = mocker.MagicMock()
@@ -827,3 +884,188 @@ def test_debug_annotation_boxes_human_indexed(tmp_path: Path, mocker: Any) -> No
     )
     boxes = cropper.debug_annotation_boxes(img, "human", 8, 8)
     assert [b[0] for b in boxes] == ["person_01", "person_02"]
+
+
+def test_extension_for_each_format() -> None:
+    assert _extension_for("jpg") == ".jpg"
+    assert _extension_for("webp") == ".webp"
+    assert _extension_for("png") == ".png"
+
+
+def test_resolve_quality_defaults_and_png_none() -> None:
+    assert _resolve_quality("jpg", None) == 95
+    assert _resolve_quality("webp", None) == 90
+    assert _resolve_quality("png", None) is None
+    assert _resolve_quality("jpg", 70) == 70
+    assert _resolve_quality("webp", 80) == 80
+    assert _resolve_quality("png", 50) is None
+
+
+def test_apply_format_to_explicit_path_preserves_jpeg_for_jpg() -> None:
+    assert _apply_format_to_explicit_path(Path("x.jpg"), "jpg") == Path("x.jpg")
+    assert _apply_format_to_explicit_path(Path("x.jpeg"), "jpg") == Path("x.jpeg")
+    assert _apply_format_to_explicit_path(Path("x.JPG"), "jpg") == Path("x.JPG")
+
+
+def test_apply_format_to_explicit_path_rewrites_other_formats() -> None:
+    assert _apply_format_to_explicit_path(Path("x.jpg"), "webp") == Path("x.webp")
+    assert _apply_format_to_explicit_path(Path("x.jpg"), "png") == Path("x.png")
+    assert _apply_format_to_explicit_path(Path("x.png"), "jpg") == Path("x.jpg")
+
+
+def test_crop_one_webp_writes_webp_sidecar(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 30, 40)
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 5, 5, "center", None, True, enhance=False, output_format="webp")
+    assert r.error is None
+    assert r.output_path == tmp_path / "x-cropped.webp"
+    with Image.open(r.output_path) as out:
+        assert out.format == "WEBP"
+        assert out.size == (5, 5)
+
+
+def test_crop_one_png_writes_png_sidecar(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 30, 40)
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 5, 5, "center", None, True, enhance=False, output_format="png")
+    assert r.error is None
+    assert r.output_path == tmp_path / "x-cropped.png"
+    with Image.open(r.output_path) as out:
+        assert out.format == "PNG"
+
+
+def test_crop_one_webp_quality_propagates_to_pillow(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 12, 12)
+    cropper = ImageCropper(model_dir=tmp_path)
+    spy = mocker.spy(Image.Image, "save")
+    r = cropper.crop_one(
+        inp, 4, 4, "center", None, True, enhance=False, output_format="webp", quality=75
+    )
+    assert r.error is None
+    matches = [
+        c
+        for c in spy.call_args_list
+        if c.kwargs.get("format") == "WEBP"
+        and c.kwargs.get("quality") == 75
+        and c.kwargs.get("method") == 6
+        and c.kwargs.get("lossless") is False
+    ]
+    assert len(matches) == 1
+
+
+def test_crop_one_jpg_quality_propagates_to_pillow(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 12, 12)
+    cropper = ImageCropper(model_dir=tmp_path)
+    spy = mocker.spy(Image.Image, "save")
+    r = cropper.crop_one(
+        inp, 4, 4, "center", None, True, enhance=False, output_format="jpg", quality=80
+    )
+    assert r.error is None
+    matches = [
+        c
+        for c in spy.call_args_list
+        if c.kwargs.get("format") == "JPEG" and c.kwargs.get("quality") == 80
+    ]
+    assert len(matches) == 1
+
+
+def test_crop_one_png_ignores_quality_in_pillow(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 12, 12)
+    cropper = ImageCropper(model_dir=tmp_path)
+    spy = mocker.spy(Image.Image, "save")
+    r = cropper.crop_one(
+        inp, 4, 4, "center", None, True, enhance=False, output_format="png", quality=50
+    )
+    assert r.error is None
+    png_calls = [c for c in spy.call_args_list if c.kwargs.get("format") == "PNG"]
+    assert len(png_calls) == 1
+    assert "quality" not in png_calls[0].kwargs
+
+
+def test_crop_one_explicit_output_suffix_rewritten_for_format(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    requested = tmp_path / "out.jpg"
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 4, 4, "center", requested, True, enhance=False, output_format="png")
+    assert r.error is None
+    expected = tmp_path / "out.png"
+    assert r.output_path == expected
+    assert expected.exists()
+    assert not requested.exists()
+
+
+def test_crop_one_explicit_output_overwrite_check_uses_rewritten_path(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 10, 10)
+    requested = tmp_path / "out.jpg"
+    blocker = tmp_path / "out.png"
+    blocker.write_bytes(b"existing")
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(inp, 4, 4, "center", requested, False, enhance=False, output_format="png")
+    assert r.error is not None
+    assert "overwrite" in r.error.lower()
+    assert "out.png" in r.error
+
+
+def test_crop_one_multi_subject_sidecars_use_format_extension(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "g.png"
+    _rgb_png(inp, 50, 50)
+    p1 = np.ones((10, 10, 3), dtype=np.uint8) * 10
+    p2 = np.ones((8, 8, 3), dtype=np.uint8) * 50
+    cropper = ImageCropper(model_dir=tmp_path)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(p1, "human"), (p2, "human")],
+    )
+    r = cropper.crop_one(inp, 4, 4, "human", None, True, enhance=False, output_format="webp")
+    assert r.error is None
+    assert (tmp_path / "g-cropped-01.webp").exists()
+    assert (tmp_path / "g-cropped-02.webp").exists()
+
+
+def test_crop_one_debug_overlay_follows_format(tmp_path: Path) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 30, 40)
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.crop_one(
+        inp,
+        5,
+        5,
+        "center",
+        None,
+        True,
+        enhance=False,
+        debug=True,
+        output_format="webp",
+    )
+    assert r.error is None
+    assert r.debug_output_path == tmp_path / "x-debug.webp"
+    with Image.open(r.debug_output_path) as dbg:
+        assert dbg.format == "WEBP"
+
+
+def test_anon_one_format_rewrites_sidecar(tmp_path: Path, mocker: Any) -> None:
+    inp = tmp_path / "x.png"
+    _rgb_png(inp, 16, 16)
+    mocker.patch.object(ImageCropper, "detect_face_bbox", return_value=None)
+    cropper = ImageCropper(model_dir=tmp_path)
+    r = cropper.anon_one(inp, None, True, output_format="webp")
+    assert r.error is None
+    assert r.output_path == tmp_path / "x-anon.webp"
+    with Image.open(r.output_path) as pil:
+        assert pil.format == "WEBP"
+
+
+def test_write_crop_debug_jpeg_png_format(tmp_path: Path) -> None:
+    img = np.zeros((24, 32, 3), dtype=np.uint8)
+    out = tmp_path / "d.png"
+    write_crop_debug_jpeg(img, [("center_crop", (4, 6, 28, 20))], out, "png", None)
+    with Image.open(out) as pil:
+        assert pil.format == "PNG"
