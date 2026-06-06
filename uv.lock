@@ -40,7 +40,7 @@ wheels = [
 [[package]]
 name = "basicsr"
 version = "1.4.2"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/codeprimate/BasicSR.git?rev=ad44fe42b9b921ed7c16732be105a4db36532e0c#ad44fe42b9b921ed7c16732be105a4db36532e0c" }
 dependencies = [
     { name = "addict" },
     { name = "future" },
@@ -61,7 +61,6 @@ dependencies = [
     { name = "tqdm" },
     { name = "yapf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/41/00a6b000f222f0fa4c6d9e1d6dcc9811a374cabb8abb9d408b77de39648c/basicsr-1.4.2.tar.gz", hash = "sha256:b89b595a87ef964cda9913b4d99380ddb6554c965577c0c10cb7b78e31301e87", size = 172524, upload-time = "2022-08-30T04:33:55.259Z" }
 
 [[package]]
 name = "black"
@@ -977,9 +976,10 @@ wheels = [
 
 [[package]]
 name = "imagecropper"
-version = "0.2.2"
+version = "0.2.4"
 source = { editable = "." }
 dependencies = [
+    { name = "basicsr" },
     { name = "click" },
     { name = "gfpgan" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1008,6 +1008,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "basicsr", git = "https://github.com/codeprimate/BasicSR.git?rev=ad44fe42b9b921ed7c16732be105a4db36532e0c" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.0" },
     { name = "click", specifier = ">=8.1.0" },

@@ -4,6 +4,14 @@ Record **architectural and behavioral decisions** here so future work does not r
 
 **Newest first.** Related choices that landed the same day **may** be merged into one dated section (subsections + a short consequences line) instead of many micro-entries.
 
+## 2026-06-06 — Pin `basicsr` to a patched fork for Python 3.13 installs
+
+**Context:** GFPGAN pulls in **basicsr**, whose `setup.py` reads its version with `exec(...)` followed by `locals()['__version__']`. Under **Python 3.13** ([PEP 667](https://peps.python.org/pep-0667/)) `exec()` no longer writes assignments back into a function's `locals()`, so the build raised `KeyError: '__version__'` while *getting requirements to build wheel*. This affects both PyPI `basicsr` 1.4.2 and `xinntao/BasicSR` git HEAD, so the package never installed on 3.13 — the earlier "pin basicsr to git HEAD" change did not fix it. `basicsr-fixed` on PyPI uses a different distribution name and so cannot satisfy `gfpgan`'s `basicsr>=1.4.2` requirement.
+
+**Decision:** Pin `basicsr @ git+https://github.com/codeprimate/BasicSR.git@<sha>` — a fork of `xinntao/BasicSR` with a single-function patch to `get_version` (read the generated `version.py` into an explicit namespace dict instead of `locals()`). The fork keeps the distribution name `basicsr` (version `1.4.2`), so the direct URL reference satisfies `gfpgan` while building cleanly on 3.13. The CPU install path compiles nothing (`BASICSR_EXT` unset), so the patch is the only build change needed; the runtime `torchvision.transforms.functional_tensor` shim is unchanged.
+
+**Consequences:** Enhancement remains a **default** feature on Python 3.13 with no regression. The build now depends on a personally maintained fork; if upstream basicsr ships a 3.13-compatible release, the pin can move back to PyPI. Verified by building `basicsr-1.4.2-py3-none-any.whl` and a full clean-venv install on Python 3.13.
+
 ## 2026-05-03 — `crop` / `anon` output ``--format`` and ``--quality``
 
 **Context:** Callers wanted alternative encodings (WebP, PNG) and a quality knob without changing the existing JPEG behavior. WebP in particular is preferred lossy at the slowest/best-compression setting; PNG is lossless and has no comparable knob.
