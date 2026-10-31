@@ -1,6 +1,6 @@
 # imagecropper
 
-**imagecropper** is a small command-line tool that crops images to a **fixed width and height** (defaults: **1024×1024**). It tries to keep **people and faces** in frame using detectors, can **blur faces** on the result (`crop --anon` or the **`anon`** command: full-frame with **`anon`**, or same as **`crop --anon`** with **`anon --crop`**), and by default **sharpens faces** on the resized output with **GFPGAN** when a face is detected (turn off with `--no-enhance`).
+**imagecropper** is a small command-line tool that crops images to a **fixed width and height** (defaults: **1024×1024**). It tries to keep **people and faces** in frame using detectors, can **blur faces** on the result (`crop --anon` or the **`anon`** command: full-frame with **`anon`**, or same as **`crop --anon`** with **`anon --crop`**), and by default **sharpens faces** on the resized output with **GFPGAN** when a face is detected (turn off with `--no-enhance`). `crop --mosaic PATH` also joins every crop tile into one tight image. Each side of that image is at most **4096** px.
 
 - **Python 3.10+**
 - **Entry point:** `imagecropper` (same behavior as `python -m imagecropper`)
@@ -34,7 +34,7 @@ pip install "imagecropper @ git+https://github.com/codeprimate/imagecropper.git"
 **Pinned release (reproducible installs):**
 
 ```bash
-pip install "imagecropper @ git+https://github.com/codeprimate/imagecropper.git@v0.1.1"
+pip install "imagecropper @ git+https://github.com/codeprimate/imagecropper.git@v0.3.0"
 ```
 
 **With development tools** (pytest, ruff, black, mypy, pre-commit):
@@ -43,7 +43,7 @@ pip install "imagecropper @ git+https://github.com/codeprimate/imagecropper.git@
 pip install "imagecropper[dev] @ git+https://github.com/codeprimate/imagecropper.git"
 ```
 
-Replace the URL’s branch or tag (`@main`, `@v0.1.1`, etc.) to match the revision you want. The package uses a `src/` layout; `pip` builds from the repository root automatically. **GFPGAN** is included in the default dependency set (no separate extra).
+Replace the URL’s branch or tag (`@main`, `@v0.3.0`, etc.) to match the revision you want. The package uses a `src/` layout; `pip` builds from the repository root automatically. **GFPGAN** is included in the default dependency set (no separate extra).
 
 ---
 
@@ -104,6 +104,9 @@ imagecropper crop -W 800 -H 800 -s face *.jpg
 # Single input, explicit output
 imagecropper crop -o out.jpg input.png
 
+# Crops plus one tight mosaic (each side at most 4096 px)
+imagecropper crop --mosaic mosaic.jpg *.jpg
+
 # Same as the console script
 python -m imagecropper crop --help
 ```
@@ -129,7 +132,8 @@ Progress and summaries go to **stderr** so stdout stays pipe-friendly. Use `--qu
 | `--model-dir` | Cache for OpenCV SSD + GFPGAN weights (default: `~/.imagecropper`); does not relocate Ultralytics `yolov8m.pt` (see [First-run downloads](#first-run-downloads-approximate-sizes)). |
 | `-o`, `--output` | Output path; only when exactly one input is given. Invalid when detection would produce more than one crop (see **CLI-006** in [docs/SPEC.md](docs/SPEC.md)). Not combinable with `--output-dir`. |
 | `--output-dir` | Directory for crop JPEGs when `-o` is omitted (same `{stem}-cropped*.jpg` basenames). Debug JPEGs still land next to each input. |
-| `--force` | Overwrite an existing output file. |
+| `--mosaic PATH` | Also write a tight mosaic of every crop tile. Each side is at most 4096 px. No padding. Crop files are still written. |
+| `--force` | Overwrite an existing output file, including an existing `--mosaic` file. |
 | `--quiet` | Less chatter on stderr. |
 | `--anon` | After crop and resize: inpaint + blur inside an expanded SSD face oval on the output-sized frame. |
 | `--enhance` / `--no-enhance` | Post-resize GFPGAN when a face is seen on the resized image (default: **on**; skipped with `--anon` or if deps/models fail). |
@@ -194,6 +198,6 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
 
 ## Status
 
-Alpha (**0.1.x**). Behavior is versioned with the package; treat CLI flags and defaults as the contract, with detail in the spec.
+Alpha (**0.3.0**). Behavior is versioned with the package; treat CLI flags and defaults as the contract, with detail in the spec.
 
 When reporting issues, include your **Python version**, **install method** (e.g. `git+` vs editable), and the **exact command** you ran.

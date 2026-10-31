@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import cast
 
 import click
+from PIL import Image
 
 from imagecropper import __version__
 from imagecropper.console import (
@@ -18,6 +19,7 @@ from imagecropper.console import (
     progress_line,
 )
 from imagecropper.crop import CropResult, ImageCropper, OutputFormat, StrategyName
+from imagecropper.mosaic import resolve_mosaic_path, write_mosaic
 
 _FORMAT_CHOICES = ["jpg", "webp", "png"]
 
@@ -112,6 +114,14 @@ def cli(ctx: click.Context) -> None:
     help="Overwrite an existing output file.",
 )
 @click.option(
+    "--mosaic",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Also write a tight mosaic of every crop tile. " "Each side is at most 4096 px. No padding."
+    ),
+)
+@click.option(
     "--quiet",
     is_flag=True,
     default=False,
@@ -160,6 +170,7 @@ def crop_command(
     output: Path | None,
     output_dir: Path | None,
     force: bool,
+    mosaic: Path | None,
     quiet: bool,
     anon: bool,
     enhance: bool,
@@ -177,6 +188,13 @@ def crop_command(
         raise click.UsageError("--output and --output-dir cannot be used together")
     if output is not None and len(input_paths) != 1:
         raise click.UsageError("--output requires exactly one INPUT")
+
+    fmt = cast(OutputFormat, output_format)
+    resolved_mosaic: Path | None = None
+    if mosaic is not None:
+        resolved_mosaic = resolve_mosaic_path(mosaic, fmt)
+        if resolved_mosaic.exists() and not force:
+            raise click.UsageError(f"refusing to overwrite existing mosaic file: {resolved_mosaic}")
 
     cropper = ImageCropper(model_dir=model_dir)
     resolved_model_dir = cropper.model_dir
@@ -211,12 +229,22 @@ def crop_command(
             debug=debug,
             output_dir=output_dir,
             progress=_crop_progress if not quiet else None,
-            output_format=cast(OutputFormat, output_format),
+            output_format=fmt,
             quality=quality,
         )
         results.append(result)
         if result.error or not quiet:
             _echo_err(progress_line(result))
+
+    mosaic_ok = True
+    if resolved_mosaic is not None:
+        mosaic_ok = _write_crop_mosaic(
+            results,
+            resolved_mosaic,
+            fmt,
+            quality,
+            quiet=quiet,
+        )
 
     total_s = perf_counter() - t0
     ok = sum(1 for r in results if not r.error)
@@ -227,8 +255,57 @@ def crop_command(
         out_dir = _footer_output_dir(results)
         _echo_err(footer(ok, failed, total_s, out_dir))
 
-    if failed:
+    if failed or not mosaic_ok:
         raise click.exceptions.Exit(1)
+
+
+def _crop_tile_paths(results: list[CropResult]) -> list[Path]:
+    """Primary crop files in input order, then confidence order inside each input."""
+    paths: list[Path] = []
+    for result in results:
+        if result.error is not None or result.output_path is None:
+            continue
+        if result.output_paths:
+            paths.extend(result.output_paths)
+            continue
+        paths.append(result.output_path)
+    return paths
+
+
+def _write_crop_mosaic(
+    results: list[CropResult],
+    mosaic_path: Path,
+    output_format: OutputFormat,
+    quality: int | None,
+    *,
+    quiet: bool,
+) -> bool:
+    """Write the mosaic. Return False when it cannot be written. Crops stay as saved."""
+    paths = _crop_tile_paths(results)
+    if not paths:
+        _echo_err("mosaic: no crop tiles to join")
+        return False
+    resolved = mosaic_path.resolve()
+    if any(path.resolve() == resolved for path in paths):
+        _echo_err(f"mosaic path collides with a crop output: {mosaic_path}")
+        return False
+
+    tiles: list[Image.Image] = []
+    try:
+        for path in paths:
+            with Image.open(path) as pil:
+                pil.load()
+                tiles.append(pil.convert("RGB"))
+        composed = write_mosaic(tiles, mosaic_path, output_format, quality)
+        if not quiet:
+            _echo_err(f"mosaic {composed.width}x{composed.height}  {mosaic_path}")
+    except (OSError, ValueError) as exc:
+        _echo_err(f"mosaic: {exc}")
+        return False
+    finally:
+        for tile in tiles:
+            tile.close()
+    return True
 
 
 def _anon_reject_crop_only_options_without_crop(

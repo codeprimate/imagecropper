@@ -52,6 +52,7 @@ def test_crop_help() -> None:
     assert "--no-enhance" in result.output
     assert "--debug" in result.output
     assert "--output-dir" in result.output
+    assert "--mosaic" in result.output
 
 
 def test_crop_debug_writes_debug_jpeg(tmp_path: Path) -> None:
@@ -628,3 +629,270 @@ def test_crop_debug_with_format_writes_debug_extension(tmp_path: Path) -> None:
     assert dbg.exists()
     with Image.open(dbg) as pil:
         assert pil.format == "WEBP"
+
+
+def test_crop_mosaic_writes_crops_and_tight_png(tmp_path: Path) -> None:
+    red = tmp_path / "a.png"
+    blue = tmp_path / "b.png"
+    Image.new("RGB", (12, 12), (255, 0, 0)).save(red)
+    Image.new("RGB", (12, 12), (0, 0, 255)).save(blue)
+    mosaic = tmp_path / "grid.jpg"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(red),
+            str(blue),
+            "-W",
+            "6",
+            "-H",
+            "6",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--format",
+            "png",
+            "--mosaic",
+            str(mosaic),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "mosaic 12x6" in (result.stderr or "")
+    assert (tmp_path / "a-cropped.png").exists()
+    assert (tmp_path / "b-cropped.png").exists()
+    written = tmp_path / "grid.png"
+    assert written.exists()
+    assert not mosaic.exists()
+    with Image.open(written) as pil:
+        assert pil.size == (12, 6)
+        assert pil.getpixel((0, 0)) == (255, 0, 0)
+        assert pil.getpixel((6, 0)) == (0, 0, 255)
+
+
+def test_crop_mosaic_one_tile_per_detected_person(tmp_path: Path, mocker: Any) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 20)).save(img)
+    first = np.full((6, 6, 3), 10, dtype=np.uint8)
+    second = np.full((6, 6, 3), 200, dtype=np.uint8)
+    mocker.patch.object(
+        ImageCropper,
+        "_select_regions",
+        return_value=[(first, "human"), (second, "human")],
+    )
+    mosaic = tmp_path / "people.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "8",
+            "-H",
+            "8",
+            "-s",
+            "human",
+            "--no-enhance",
+            "--format",
+            "png",
+            "--mosaic",
+            str(mosaic),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert (tmp_path / "a-cropped-01.png").exists()
+    assert (tmp_path / "a-cropped-02.png").exists()
+    with Image.open(mosaic) as pil:
+        assert pil.size == (16, 8)
+        assert pil.getpixel((0, 0)) == (10, 10, 10)
+        assert pil.getpixel((8, 0)) == (200, 200, 200)
+
+
+def test_crop_mosaic_skips_failed_input(tmp_path: Path) -> None:
+    good = tmp_path / "good.png"
+    bad = tmp_path / "bad.png"
+    Image.new("RGB", (8, 8), (0, 255, 0)).save(good)
+    bad.write_bytes(b"not an image")
+    mosaic = tmp_path / "grid.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(good),
+            str(bad),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--format",
+            "png",
+            "--mosaic",
+            str(mosaic),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 1
+    assert (tmp_path / "good-cropped.png").exists()
+    assert not (tmp_path / "bad-cropped.png").exists()
+    with Image.open(mosaic) as pil:
+        assert pil.size == (4, 4)
+        assert pil.getpixel((0, 0)) == (0, 255, 0)
+
+
+def test_crop_mosaic_refuses_existing_file_without_force(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (8, 8)).save(img)
+    existing = tmp_path / "grid.jpg"
+    Image.new("RGB", (2, 2), (1, 2, 3)).save(existing)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--mosaic",
+            str(tmp_path / "grid.png"),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code != 0
+    assert not (tmp_path / "a-cropped.jpg").exists()
+    assert not (tmp_path / "grid.png").exists()
+    with Image.open(existing) as pil:
+        assert pil.size == (2, 2)
+
+
+def test_crop_mosaic_force_overwrites(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (8, 8), (255, 255, 0)).save(img)
+    mosaic = tmp_path / "grid.png"
+    Image.new("RGB", (2, 2)).save(mosaic)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--format",
+            "png",
+            "--force",
+            "--mosaic",
+            str(mosaic),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "mosaic " not in (result.stderr or "")
+    with Image.open(mosaic) as pil:
+        assert pil.size == (4, 4)
+
+
+def test_crop_mosaic_does_not_include_debug_image(tmp_path: Path) -> None:
+    img = tmp_path / "a.png"
+    Image.new("RGB", (20, 30), (20, 30, 40)).save(img)
+    mosaic = tmp_path / "grid.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(img),
+            "-W",
+            "5",
+            "-H",
+            "5",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--debug",
+            "--format",
+            "png",
+            "--mosaic",
+            str(mosaic),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert (tmp_path / "a-debug.png").exists()
+    with Image.open(mosaic) as pil:
+        assert pil.size == (5, 5)
+
+
+def test_crop_mosaic_refuses_path_that_matches_a_crop(tmp_path: Path) -> None:
+    red = tmp_path / "a.png"
+    blue = tmp_path / "b.png"
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(red)
+    Image.new("RGB", (8, 8), (0, 0, 255)).save(blue)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(red),
+            str(blue),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--format",
+            "png",
+            "--mosaic",
+            str(tmp_path / "a-cropped.png"),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "collides" in (result.stderr or "")
+    with Image.open(tmp_path / "a-cropped.png") as pil:
+        assert pil.size == (4, 4)
+    assert (tmp_path / "b-cropped.png").exists()
+
+
+def test_crop_mosaic_all_inputs_failed_writes_nothing(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(b"not an image")
+    mosaic = tmp_path / "grid.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "crop",
+            str(bad),
+            "-W",
+            "4",
+            "-H",
+            "4",
+            "-s",
+            "center",
+            "--no-enhance",
+            "--mosaic",
+            str(mosaic),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 1
+    assert not mosaic.exists()
+    assert "no crop tiles" in (result.stderr or "")
